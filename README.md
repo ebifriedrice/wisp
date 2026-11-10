@@ -25,7 +25,7 @@ to GitHub Packages:
 ```bash
 dotnet tool install --global Wisp.Cli \
   --add-source https://nuget.pkg.github.com/ebifriedrice/index.json \
-  --version 0.1.3-bootstrap
+  --version 0.1.4-bootstrap
 wisp --version
 ```
 
@@ -263,13 +263,25 @@ Imports and aliases are namespace-scoped. `:refer` and `:use` add referrals;
 `:use` skips `^:private` vars. `(in-ns 'demo.other)` switches the session
 namespace.
 
-Evaluation uses declaration-oriented passes for every batch: a source file, a
-REPL submission, or the combined project graph. Namespaces run first, then macro
-definitions. The remaining forms are macro-expanded and classified, then types
-(with retries for forward type references), functions, and finally values and
-methods. Resolution always sees expanded forms. No `declare` form is needed for
-forward references, whether the definitions are in one file, a REPL submission,
-or across projects.
+Evaluation is linear within a namespace. Forms run in source order, and macros
+expand before each form is resolved. Types, values, and macros must be defined
+before use. Cross-namespace order is determined by `:require`/`:use` and project
+references, not file order.
+
+Use `declare` for forward var references and mutual recursion:
+
+```clojure
+(declare even? odd?)
+
+(defn even? [n]
+  (if (= n 0) true (odd? (- n 1))))
+
+(defn odd? [n]
+  (if (= n 0) false (even? (- n 1))))
+```
+
+`declare` interns the names without overwriting existing bindings. It is not a
+batch pre-pass: the declarations happen at their source position.
 
 ## 9. Documentation in the language
 
@@ -571,18 +583,19 @@ See [How to use the MSBuild SDK](docs/how-to-guides/use-the-msbuild-sdk.md).
 Compiler layers:
 
 1. Surface forms with metadata and source ranges.
-2. Declaration passes for every batch: namespaces, macro definitions,
-   macro-expansion and classification, types with forward-reference retries,
-   functions, then values and methods.
-3. Resolution and desugaring of expanded forms into Core IR: `Const`, `Local`,
-   `VarRef`, `If`, `Do`, `Let`, `Lambda`, `Call`, `Def`, `Quote`, namespace
-   ops, CLR call/property/construct nodes, type and method definitions,
-   `Async`, `Await`, `Loop`, `Recur`, `Try`, and `Throw`.
+2. Macro expansion per form, before resolution.
+3. Resolution and desugaring into Core IR: `Const`, `Local`, `VarRef`, `If`,
+   `Do`, `Let`, `Lambda`, `Call`, `Def`, `Declare`, `Quote`, namespace ops,
+   CLR call/property/construct nodes, type and method definitions, `Async`,
+   `Await`, `Loop`, `Recur`, `Try`, and `Throw`.
 4. `recur` tail-position and arity validation.
 5. Constant folding, `do` flattening, and identity-let elimination.
 6. Interpreter or emitted IL in a collectible dynamic assembly. Lambdas become
    generated `AFn` subclasses; async bodies use runtime async on .NET 11 and a
    continuation transform on .NET 10.
+
+Within a namespace forms run linearly. Project references and `:require` edges
+determine cross-namespace order.
 
 ## 17. Samples
 
@@ -641,5 +654,5 @@ wisp samples/records.wisp
 - [Use the MSBuild SDK](docs/how-to-guides/use-the-msbuild-sdk.md)
 - [CLI and REPL reference](docs/reference/cli.md)
 - [Project file reference](docs/reference/project-file.md)
-- [About double-pass evaluation](docs/explanation/double-pass-projects.md)
+- [About evaluation order and declarations](docs/explanation/double-pass-projects.md)
 - [About exhaustive pattern matching](docs/explanation/exhaustive-matching.md)

@@ -82,23 +82,13 @@ projects share one namespace registry. Project cycles are reported as errors.
 
 ## Evaluation order
 
-The same declaration passes run for every batch: a source file, a REPL
-submission, or a project graph.
+Project references are loaded depth-first, dependencies first. Namespaces are
+ordered by `:require` and `:use` clauses.
 
-1. Project references are loaded depth-first, dependencies first.
-2. Namespaces are ordered by `:require` and `:use` clauses.
-3. All namespace forms run.
-4. Macro definitions run.
-5. Remaining forms are macro-expanded and classified.
-6. Type declarations run, with retries for forward type references.
-7. Functions and active patterns run.
-8. Values, methods, and remaining top-level forms run.
-
-Resolution runs on expanded forms, so macro-generated definitions take part in
-the same passes as written definitions.
-
-No `declare` form is required for functions or types. See
-[About double-pass evaluation](../explanation/double-pass-projects.md).
+Within a namespace, forms run linearly in source order: macro-expand, resolve,
+evaluate, then continue. Types, macros, values, and methods must be defined
+before use. Use `(declare ...)` for forward vars and mutual recursion; see
+[About evaluation order and declarations](../explanation/double-pass-projects.md).
 
 ## CLI commands
 
@@ -154,8 +144,8 @@ Package: `Wisp.Sdk`.
 | `WispRun` | Depends on `WispBuild`; runs `wisp run`. |
 | `Wisp` | Depends on `WispRun`. |
 
-The SDK package is `Wisp.Sdk` version `0.1.3-bootstrap`. The CLI tool package is
-`Wisp.Cli` version `0.1.3-bootstrap` with command name `wisp`.
+The SDK package is `Wisp.Sdk` version `0.1.4-bootstrap`. The CLI tool package is
+`Wisp.Cli` version `0.1.4-bootstrap` with command name `wisp`.
 
 ## Current package limits
 

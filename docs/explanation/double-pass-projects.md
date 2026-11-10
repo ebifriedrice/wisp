@@ -1,85 +1,78 @@
-# About double-pass evaluation
+# About evaluation order and declarations
 
-Every Wisp batch uses declaration-oriented passes: a source file, a REPL
-submission, or the combined project graph. Functions and types can be referenced
-before their definition text in the same batch.
+Wisp evaluates forms linearly within a namespace. Cross-namespace order is
+determined by dependencies, not by the order files happen to be passed to the
+CLI.
 
-## Why declarations exist in Clojure
+## Within a namespace
 
-Clojure compiles and evaluates each top-level form as it is read. A function body
-may mention a var that does not exist yet, but calling it before the defining
-form runs fails. Clojure therefore provides `(declare name)` for forward
-references.
+A file, REPL submission, or namespace body runs in source order:
 
-Wisp applies declaration passes whenever it has a batch of forms. A project has
-all files up front; a file or REPL submission has all submitted forms up front.
+1. Each form is macro-expanded.
+2. The expanded form is resolved and compiled.
+3. The form is evaluated.
+4. The next form runs.
 
-## The four project phases
+This means types, macros, values, and methods must be defined before they are
+used. The compiler does not collect all definitions from a namespace and run
+them in dependency order.
 
-### 1. Namespaces
+The REPL keeps the same model. A submission runs forms in order, and later
+submissions see the vars created by earlier ones.
 
-Every source file is read and its `ns` form runs. Imports, aliases, referrals,
-and namespace docs are registered. Files are ordered by `:require` and `:use`
-dependencies, with project references loaded first.
+## Forward references and `declare`
 
-### 2. Macro definitions
+Function bodies are not executed when they are defined, so a function can refer
+to a var that is defined later, as long as the call happens after the definition.
+For explicit forward references and mutual recursion, use `declare`:
 
-`defmacro` forms run before ordinary forms so subsequent forms can use them.
-Macros receive raw forms, so this phase does not depend on type resolution.
+```clojure
+(declare even? odd?)
 
-### 3. Macro expansion and classification
+(defn even? [n]
+  (if (= n 0) true (odd? (- n 1))))
 
-Every remaining form is macro-expanded. Classification happens on the expanded
-form, so a macro that expands to `def`, `defn`, `defclass`, `defunion`, or
-another definition participates in the normal declaration passes. A macro that
-expands to another `defmacro` is evaluated as encountered.
+(defn odd? [n]
+  (if (= n 0) false (even? (- n 1))))
+```
 
-Resolution runs after this expansion step. Type hints, var references, and
-special forms are resolved against the expanded form.
+`declare` interns the names at that source position without overwriting existing
+bindings. It is a normal form, not a hidden batch pre-pass.
 
-### 4. Types
+## Across namespaces and projects
 
-`defclass`, `deftype`, `defstruct`, `definterface`, `defdelegate`, and
-`defunion` forms run before bodies. A type that refers to a later type fails on
-its first attempt and is retried after other declarations have run. This is why
-`Holder` can contain a `^Later` field before `Later` exists.
+`ns` declarations describe namespace dependencies:
 
-A cycle with no resolvable order eventually stops making progress and reports
-the remaining diagnostics.
+```clojure
+(ns demo.app
+  (:require [demo.math :as math]))
+```
 
-### Project graph ordering
+Project loading uses those edges, plus `ProjectReference` edges, to order files.
+A referenced project loads before its consumer, and a required namespace loads
+before the namespace that requires it. The order of files on disk or in the
+manifest does not decide evaluation order across namespaces.
 
-Project loading adds dependency ordering on top of the same passes. Referenced
-projects load first, and files are arranged by `:require`/`:use` namespaces.
-The declaration passes themselves are identical to a single-file or REPL
-batch.
+Within each namespace, the linear rules above apply.
 
-### 5. Functions
+## Macros
 
-Function definitions and active patterns are evaluated after types. Their bodies
-are not executed, only compiled, so a function may reference another function
-defined later in the source or in another file.
+Macros expand before the expanded form is resolved. This lets a macro produce a
+`def`, `defn`, `defclass`, or another form, and that expanded form is then
+compiled normally.
 
-### 6. Values and remaining forms
+A macro itself must be defined before it is used in the same namespace. Macro
+bodies run at expansion time, so helper functions called by a macro must already
+be defined when that macro expands.
 
-`def` values, `defmethod` forms, constructors, and other top-level expressions
-run in dependency order. Only after this phase does `wisp run` invoke the
-startup function.
+## What this means in practice
 
-## What double-pass does not change
-
-Declaration passes do not make eager initialization order irrelevant:
-
-- A top-level expression that calls a function before that function's `def`
-  value has run still sees the value that exists at that moment.
-- A macro body that calls a helper function can only see helpers evaluated
-  before the macro is expanded.
-- A macro used earlier in the same batch must be defined before that use.
-- Cyclic project references are rejected; namespace cycles are loaded
-  best-effort in source order.
-
-These are runtime ordering facts, not declaration facts. Use explicit function
-calls after definitions when initialization order matters.
+- Define types before fields, methods, or functions that name them.
+- Define macros before forms that use them.
+- Use `(declare ...)` for explicit forward vars and mutual recursion.
+- Use `:require` and project references to express cross-namespace order.
+- Project loaders order namespaces; they do not make a namespace's own body
+  order-independent.
 
 ## Where to go next
 

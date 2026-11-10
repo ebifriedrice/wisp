@@ -67,4 +67,4 @@ match is not exhaustive for union Shape.
 ```
 
 See the language examples in the [README](../../README.md#pattern-matching-unions-and-active-patterns)
-and the [project loading explanation](double-pass-projects.md).
+and the [evaluation-order explanation](double-pass-projects.md).

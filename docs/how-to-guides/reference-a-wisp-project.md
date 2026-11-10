@@ -54,5 +54,5 @@ list both through a common application project rather than relying on the file
 system order.
 
 See the [project file reference](../reference/project-file.md) for every manifest
-element and the [double-pass explanation](../explanation/double-pass-projects.md)
-for why forward references work.
+element and the [evaluation-order explanation](../explanation/double-pass-projects.md)
+for how namespaces and `declare` interact.

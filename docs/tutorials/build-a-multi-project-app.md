@@ -1,8 +1,7 @@
 # Build a multi-project Wisp application
 
 In this tutorial we will build a small application that depends on a separate
-Wisp library project, run it, and use forward references without declaration
-forms.
+Wisp library project, run it, and use `declare` for forward references.
 
 ## Prerequisites
 
@@ -39,14 +38,15 @@ Now create `samples/projects/math/src/math.wisp`:
 
 (defn add [a b] (+ a b))
 
+(declare defined-later)
+
 (defn later [] (defined-later))
 
 (defn defined-later [] 99)
 ```
 
-Notice that `later` calls `defined-later` before it is written. A project build
-declares all functions before values run, so no `(declare defined-later)` form
-is needed.
+Evaluation is linear within a namespace. The `declare` form interns
+`defined-later` before `later` refers to it.
 
 ## Step 2: Create the application project
 
@@ -76,37 +76,39 @@ Create `samples/projects/app/src/app.wisp`:
   "The demo application."
   (:require [demo.math :as math]))
 
+(defclass Later [^int n])
+
 (defclass Holder [^Later value])
 
-(defclass Later [^int n])
+(declare helper)
 
 (defn main []
   (println "sum:" (math/add 20 22))
   (println "forward:" (helper))
   (println "library-forward:" (math/later))
-  (println "type-forward:" (.-n (.-value (Holder {:value (Later {:n 7})})))))
+  (println "type:" (.-n (.-value (Holder {:value (Later {:n 7})})))))
 
 (defn helper []
-  "no pre-declaration")
+  "declared before use")
 ```
 
-`Holder` references `Later` before `Later` is declared, and `main` references
-`helper` before `helper` is defined. The project loader resolves both.
+Types follow source order, so `Later` comes before `Holder`. `declare` makes the
+forward function reference explicit.
 
 ## Step 3: Run the application
 
 ```console
 $ dotnet run --project src/Wisp.Cli --no-build -- run samples/projects/app/app.wisp.proj
 sum: 42
-forward: no pre-declaration
+forward: declared before use
 library-forward: 99
-type-forward: 7
+type: 7
 ```
 
 The output should match exactly.
 
 Notice that the application used `demo.math/add` through its `:require` alias,
-and that the library's own forward reference also worked.
+and that both projects used `declare` for forward function references.
 
 ## Step 4: Build without running
 
@@ -121,7 +123,7 @@ startup function.
 ## What we built
 
 We built a two-project Wisp application with a project reference, a
-cross-namespace require, and forward references across functions and types.
+cross-namespace require, and explicit `declare` forward references.
 
 Continue with [how to reference another Wisp project](../how-to-guides/reference-a-wisp-project.md)
 or read the [project file reference](../reference/project-file.md).
