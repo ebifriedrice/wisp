@@ -90,6 +90,15 @@ The project REPL watches every project directory and `*.wisp.proj` manifest.
 
 Removed definitions leave their old vars in the session until a full reload.
 
+## Diagnostics
+
+Reader, compiler, and runtime diagnostics are rendered with file, line,
+column, and a source caret when the source is available. Uncaught runtime
+failures also include a Wisp stack trace with one
+`at <namespace>/<function> (<file>:<line>:<column>)` line per active function.
+Each line points at that function's call site; the final line is
+`<top-level>`.
+
 ## Packages
 
 - `Wisp.Cli` — dotnet tool, command name `wisp`.

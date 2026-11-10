@@ -209,6 +209,22 @@ available through `Wisp.Core` and `Wisp.Reader`.
 Typed catches match CLR assignability in source order; an untyped catch must be
 last.
 
+Uncaught runtime failures carry a Wisp stack trace. The diagnostic points at
+the failing expression and lists each active function with the call site that
+reached it, ending with `<top-level>`:
+
+```text
+lib.wisp:2:17: error [WISP3001]: Division by zero.
+2 |
+  | (defn inner [x] (/ x 0))
+  |                 ^^^^^^^
+  = stack trace:
+  =   at lib/inner (lib.wisp:2:17)
+  =   at lib/middle (lib.wisp:3:18)
+  =   at app/main (app.wisp:2:15)
+  =   at <top-level> (app.wisp:3:1)
+```
+
 ### Destructuring
 
 ```clojure

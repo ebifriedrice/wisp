@@ -124,6 +124,8 @@ Starts the REPL.
 - `2` — usage error.
 
 Diagnostics are rendered with file, line, and column where a source span exists.
+Runtime failures also include a Wisp stack trace pointing at each calling
+function and its call site.
 
 ## MSBuild SDK
 
