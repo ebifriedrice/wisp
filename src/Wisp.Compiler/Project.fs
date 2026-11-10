@@ -32,6 +32,16 @@ type ProjectRunResult =
       Diagnostics: string list
       LastValue: obj option }
 
+type ProjectSession =
+    { RootPath: string
+      Output: TextWriter
+      mutable Root: WispProject
+      mutable Projects: WispProject list
+      mutable Sources: ProjectSource list
+      mutable Session: Session
+      mutable Texts: Map<string, string>
+      mutable LastValue: obj option }
+
 module Project =
     type private FormKind =
         | NamespaceForm
@@ -368,7 +378,110 @@ module Project =
         session.EvalForm form
         |> Result.mapError (renderDiagnostics source)
 
-    let run (path: string) (output: TextWriter) (execute: bool) : Result<ProjectRunResult, string list> =
+    let private readLoadedSources (sources: ProjectSource list) =
+        let diagnostics = ResizeArray<string>()
+        let loaded =
+            sources
+            |> List.choose (fun source ->
+                match readForms source source.NamespaceName with
+                | Error errors ->
+                    errors
+                    |> List.iter (fun diagnostic ->
+                        let text = SourceText.Create(source.Text, source.Path)
+                        diagnostics.Add(text.Render diagnostic))
+                    None
+                | Ok forms ->
+                    Some
+                        { Source = source
+                          Forms = forms
+                          NamespaceForm =
+                            forms
+                            |> List.tryFind (fun form -> namespaceNameOfForm form |> Option.isSome) })
+        if diagnostics.Count = 0 then Ok loaded else Error(List.ofSeq diagnostics)
+
+    let private evaluateLoaded (session: Session) (loaded: LoadedSource list) =
+        let diagnostics = ResizeArray<string>()
+        let mutable lastValue = None
+
+        let evaluateSuccess item form =
+            match evaluateForm session item.Source form with
+            | Ok value ->
+                lastValue <- Some value
+                true
+            | Error errors ->
+                errors |> List.iter diagnostics.Add
+                false
+
+        for item in loaded do
+            setNamespace session item.Source.NamespaceName
+            match item.NamespaceForm with
+            | Some namespaceForm ->
+                match evaluateForm session item.Source namespaceForm with
+                | Ok _ -> ()
+                | Error errors -> errors |> List.iter diagnostics.Add
+            | None -> ()
+
+        let formsWithKind =
+            loaded
+            |> List.collect (fun item ->
+                item.Forms |> List.map (fun form -> item, form, formKind form))
+
+        let pendingTypes =
+            formsWithKind
+            |> List.choose (fun (item, form, kind) ->
+                if kind = TypeForm then Some(item, form) else None)
+        let mutable typeProgress = true
+        let mutable remainingTypes = pendingTypes
+        let mutable typeErrors : (LoadedSource * obj * string list) list = []
+        while typeProgress && not remainingTypes.IsEmpty do
+            typeProgress <- false
+            let next =
+                remainingTypes
+                |> List.filter (fun (item, form) ->
+                    match evaluateForm session item.Source form with
+                    | Ok value ->
+                        lastValue <- Some value
+                        typeProgress <- true
+                        false
+                    | Error errors ->
+                        typeErrors <- (item, form, errors) :: typeErrors
+                        true)
+            remainingTypes <- next
+        if not remainingTypes.IsEmpty then
+            for item, form, errors in typeErrors |> List.rev do
+                if
+                    remainingTypes
+                    |> List.exists (fun (remainingItem, remainingForm) ->
+                        obj.ReferenceEquals(remainingItem, item)
+                        && obj.ReferenceEquals(remainingForm, form))
+                then
+                    errors |> List.iter diagnostics.Add
+
+        for kindToRun in [ MacroForm; FunctionForm ] do
+            for item, form, kind in formsWithKind do
+                if kind = kindToRun then
+                    evaluateSuccess item form |> ignore
+
+        for item, form, kind in formsWithKind do
+            match kind with
+            | ValueForm
+            | OtherForm -> evaluateSuccess item form |> ignore
+            | _ -> ()
+
+        List.ofSeq diagnostics, lastValue
+
+    let private buildSession (sources: ProjectSource list) (output: TextWriter) =
+        match readLoadedSources sources with
+        | Error errors -> Error errors
+        | Ok loaded ->
+            let session = Session(output = output)
+            let diagnostics, lastValue = evaluateLoaded session loaded
+            if diagnostics.IsEmpty then
+                Ok(session, loaded, lastValue)
+            else
+                Error diagnostics
+
+    let openSession (path: string) (output: TextWriter) : Result<ProjectSession, string list> =
         match loadGraph path with
         | Error errors -> Error errors
         | Ok projects ->
@@ -376,134 +489,142 @@ module Project =
             | Error errors -> Error errors
             | Ok sources ->
                 let ordered = orderSources sources
-                let session = Session(output = output)
-                let diagnostics = ResizeArray<string>()
-                let mutable lastValue = None
-
-                let load (source: ProjectSource) =
-                    match readForms source source.NamespaceName with
-                    | Error errors ->
-                        errors
-                        |> List.iter (fun diagnostic ->
-                            let text = SourceText.Create(source.Text, source.Path)
-                            diagnostics.Add(text.Render diagnostic))
-                        None
-                    | Ok forms ->
-                        Some
-                            { Source = source
-                              Forms = forms
-                              NamespaceForm =
-                                forms
-                                |> List.tryFind (fun form -> namespaceNameOfForm form |> Option.isSome) }
-
-                let loaded = ordered |> List.choose load
-
-                for item in loaded do
-                    setNamespace session item.Source.NamespaceName
-                    match item.NamespaceForm with
-                    | Some namespaceForm ->
-                        match evaluateForm session item.Source namespaceForm with
-                        | Ok _ -> ()
-                        | Error errors -> errors |> List.iter diagnostics.Add
-                    | None -> ()
-
-                let formsWithKind =
-                    loaded
-                    |> List.collect (fun item ->
-                        item.Forms
-                        |> List.map (fun form -> item, form, formKind form))
-
-                let evaluateSuccess item form =
-                    match evaluateForm session item.Source form with
-                    | Ok value ->
-                        lastValue <- Some value
-                        true
-                    | Error errors ->
-                        errors |> List.iter diagnostics.Add
-                        false
-
-                let pendingTypes =
-                    formsWithKind
-                    |> List.choose (fun (item, form, kind) ->
-                        if kind = TypeForm then Some(item, form) else None)
-                let mutable typeProgress = true
-                let mutable remainingTypes = pendingTypes
-                let mutable typeErrors : (LoadedSource * obj * string list) list = []
-                while typeProgress && not remainingTypes.IsEmpty do
-                    typeProgress <- false
-                    let next =
-                        remainingTypes
-                        |> List.filter (fun (item, form) ->
-                            match evaluateForm session item.Source form with
-                            | Ok value ->
-                                lastValue <- Some value
-                                typeProgress <- true
-                                false
-                            | Error errors ->
-                                typeErrors <- (item, form, errors) :: typeErrors
-                                true)
-                    remainingTypes <- next
-                if not remainingTypes.IsEmpty then
-                    for item, form, errors in typeErrors |> List.rev do
-                        if
-                            remainingTypes
-                            |> List.exists (fun (remainingItem, remainingForm) ->
-                                obj.ReferenceEquals(remainingItem, item)
-                                && obj.ReferenceEquals(remainingForm, form))
-                        then
-                            errors |> List.iter diagnostics.Add
-
-                for kindToRun in [ MacroForm; FunctionForm ] do
-                    for item, form, kind in formsWithKind do
-                        if kind = kindToRun then
-                            evaluateSuccess item form |> ignore
-
-                for item, form, kind in formsWithKind do
-                    match kind with
-                    | ValueForm
-                    | OtherForm ->
-                        evaluateSuccess item form |> ignore
-                    | _ -> ()
-
-                if execute then
-                    let rootProject = List.last projects
-                    let startup =
-                        rootProject.StartupObject
-                        |> Option.orElse (Some(rootProject.RootNamespace + "/main"))
-                    let startupValue =
-                        startup
-                        |> Option.bind (fun name ->
-                            let symbol = Symbol.Parse name
-                            let namespaceName =
-                                symbol.Namespace |> Option.defaultValue rootProject.RootNamespace
-                            session.Runtime.Registry.FindVar(namespaceName, symbol.Name))
-                        |> Option.map (fun variable -> variable.Root)
-                    match startupValue with
-                    | Some value ->
-                        let previous = RecordRuntimeContext.getCurrent ()
-                        RecordRuntimeContext.setCurrent (box session.Runtime)
-                        try
-                            match value with
-                            | :? IFn as functionValue ->
-                                lastValue <- Some(functionValue.Invoke [||])
-                            | _ ->
-                                diagnostics.Add(
-                                    sprintf "%s: startup object is not callable."
-                                        (startup |> Option.defaultValue "startup")
-                                )
-                        finally
-                            RecordRuntimeContext.setCurrent previous
-                    | None ->
-                        diagnostics.Add(
-                            sprintf "%s: startup function not found."
-                                (startup |> Option.defaultValue "startup")
-                        )
-
-                if diagnostics.Count = 0 then
+                match buildSession ordered output with
+                | Error errors -> Error errors
+                | Ok(session, _, lastValue) ->
                     Ok
-                        { Project = List.last projects
+                        { RootPath = Path.GetFullPath path
+                          Output = output
+                          Root = List.last projects
+                          Projects = projects
+                          Sources = ordered
                           Session = session
-                          Diagnostics = []
+                          Texts = ordered |> List.map (fun source -> source.Path, source.Text) |> Map.ofList
                           LastValue = lastValue }
+
+    let private projectSignature (project: WispProject) =
+        project.Path,
+        project.Name,
+        project.RootNamespace,
+        project.OutputType,
+        project.StartupObject,
+        project.SourcePatterns,
+        project.ProjectReferences
+
+    let refresh (state: ProjectSession) : Result<string list, string list> =
+        match loadGraph state.RootPath with
+        | Error errors -> Error errors
+        | Ok projects ->
+            match scanSources projects with
+            | Error errors -> Error errors
+            | Ok sources ->
+                let ordered = orderSources sources
+                let oldPaths = state.Sources |> List.map (fun source -> source.Path) |> Set.ofList
+                let newPaths = ordered |> List.map (fun source -> source.Path) |> Set.ofList
+                let projectsChanged =
+                    List.map projectSignature state.Projects <> List.map projectSignature projects
+                let changed =
+                    ordered
+                    |> List.filter (fun source ->
+                        match state.Texts.TryFind source.Path with
+                        | Some oldText -> oldText <> source.Text
+                        | None -> true)
+                let oldSources =
+                    state.Sources |> List.map (fun source -> source.Path, source) |> Map.ofList
+                let mutable needsFullReload = oldPaths <> newPaths || projectsChanged
+                for source in changed do
+                    if not needsFullReload then
+                        match readForms source source.NamespaceName with
+                        | Error _ -> needsFullReload <- true
+                        | Ok forms ->
+                            if forms |> List.exists (fun form -> formKind form = TypeForm) then
+                                needsFullReload <- true
+                            else
+                                match oldSources.TryFind source.Path with
+                                | Some oldSource when
+                                    oldSource.NamespaceName = source.NamespaceName
+                                    && oldSource.Dependencies = source.Dependencies -> ()
+                                | _ -> needsFullReload <- true
+
+                if needsFullReload then
+                    match buildSession ordered state.Output with
+                    | Error errors -> Error errors
+                    | Ok(session, _, lastValue) ->
+                        state.Root <- List.last projects
+                        state.Projects <- projects
+                        state.Sources <- ordered
+                        state.Session <- session
+                        state.Texts <-
+                            ordered
+                            |> List.map (fun source -> source.Path, source.Text)
+                            |> Map.ofList
+                        state.LastValue <- lastValue
+                        Ok [ state.Root.Path ]
+                elif changed.IsEmpty then
+                    Ok []
                 else
-                    Error(List.ofSeq diagnostics)
+                    match readLoadedSources changed with
+                    | Error errors -> Error errors
+                    | Ok loaded ->
+                        let diagnostics, lastValue = evaluateLoaded state.Session loaded
+                        if diagnostics.IsEmpty then
+                            state.Root <- List.last projects
+                            state.Projects <- projects
+                            state.Sources <- ordered
+                            state.Texts <-
+                                ordered
+                                |> List.map (fun source -> source.Path, source.Text)
+                                |> Map.ofList
+                            state.LastValue <- lastValue
+                            Ok(changed |> List.map (fun source -> source.Path))
+                        else
+                            Error diagnostics
+
+    let run (path: string) (output: TextWriter) (execute: bool) : Result<ProjectRunResult, string list> =
+        match openSession path output with
+        | Error errors -> Error errors
+        | Ok state ->
+            let diagnostics = ResizeArray<string>()
+            let mutable lastValue = state.LastValue
+            if execute then
+                let rootProject = state.Root
+                let startup =
+                    rootProject.StartupObject
+                    |> Option.orElse (Some(rootProject.RootNamespace + "/main"))
+                let startupValue =
+                    startup
+                    |> Option.bind (fun name ->
+                        let symbol = Symbol.Parse name
+                        let namespaceName =
+                            symbol.Namespace |> Option.defaultValue rootProject.RootNamespace
+                        state.Session.Runtime.Registry.FindVar(namespaceName, symbol.Name))
+                    |> Option.map (fun variable -> variable.Root)
+                match startupValue with
+                | Some value ->
+                    let previous = RecordRuntimeContext.getCurrent ()
+                    RecordRuntimeContext.setCurrent (box state.Session.Runtime)
+                    try
+                        match value with
+                        | :? IFn as functionValue ->
+                            lastValue <- Some(functionValue.Invoke [||])
+                        | _ ->
+                            diagnostics.Add(
+                                sprintf "%s: startup object is not callable."
+                                    (startup |> Option.defaultValue "startup")
+                            )
+                    finally
+                        RecordRuntimeContext.setCurrent previous
+                | None ->
+                    diagnostics.Add(
+                        sprintf "%s: startup function not found."
+                            (startup |> Option.defaultValue "startup")
+                    )
+
+            if diagnostics.Count = 0 then
+                Ok
+                    { Project = state.Root
+                      Session = state.Session
+                      Diagnostics = []
+                      LastValue = lastValue }
+            else
+                Error(List.ofSeq diagnostics)
