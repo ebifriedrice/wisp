@@ -1377,6 +1377,26 @@ type CompilerTests() =
                 Runtime.InteropServices.Marshal.FreeHGlobal memory
 
     [<Fact>]
+    member _.``single-file evaluation uses declaration passes for forward references``() =
+        for backend in [ ExecutionBackend.Interpreter; ExecutionBackend.ReflectionEmit ] do
+            let suffix = Guid.NewGuid().ToString("N").Substring(0, 8)
+            let holder = "Holder" + suffix
+            let later = "Later" + suffix
+            let source =
+                sprintf
+                    "(defn main [] (helper)) (defn helper [] 42) (defclass %s [^%s value]) (defclass %s [^int n]) (defn make [] (%s {:value (%s {:n 7})})) (main) (.-n (.-value (make)))"
+                    holder
+                    later
+                    later
+                    holder
+                    later
+            let session = Session(output = new StringWriter(), backend = backend)
+            let result = session.EvalText(source)
+            Assert.Empty(result.Diagnostics)
+            Assert.Equal(42L, Convert.ToInt64(Print.printString result.Values.[result.Values.Length - 2]))
+            Assert.Equal("7", Print.printString result.Values.[result.Values.Length - 1])
+
+    [<Fact>]
     member _.``definition forms attach docstrings to var and method metadata on both backends``() =
         for backend in [ ExecutionBackend.Interpreter; ExecutionBackend.ReflectionEmit ] do
             let suffix =

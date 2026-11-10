@@ -7,7 +7,7 @@ open Wisp.Core
 open Wisp.Reader
 open Wisp.Compiler
 
-let private version = "0.1.1-bootstrap"
+let private version = "0.1.2-bootstrap"
 
 let private usage () =
     printfn "wisp %s" version
@@ -169,40 +169,25 @@ let private runRepl (getSession: unit -> Session) (refresh: (bool -> Result<stri
                 if buffer.Length > 0 then buffer.AppendLine() |> ignore
                 buffer.Append(line) |> ignore
                 nextIndent <- Repl.nextIndent line
-                let mutable processing = true
-                while processing && buffer.Length > 0 do
-                    let text = buffer.ToString()
-                    let source = SourceText.Create(text, "<repl>")
-                    let session = getSession ()
-                    let read = Reader.readFormsFrom source session.ReaderOptions 0
-                    if not read.Diagnostics.IsEmpty then
-                        if hasIncompleteDiagnostic read.Diagnostics then
-                            processing <- false
-                        else
-                            renderDiagnostics source read.Diagnostics
-                            buffer.Clear() |> ignore
-                            nextIndent <- 0
-                            processing <- false
-                    elif read.Forms.IsEmpty then
+                let text = buffer.ToString()
+                let source = SourceText.Create(text, "<repl>")
+                let session = getSession ()
+                let result = session.EvalText source
+                if not result.Diagnostics.IsEmpty then
+                    if hasIncompleteDiagnostic result.Diagnostics then
+                        ()
+                    else
+                        renderDiagnostics source result.Diagnostics
                         buffer.Clear() |> ignore
                         nextIndent <- 0
-                        processing <- false
-                    else
-                        let previous = RecordRuntimeContext.getCurrent ()
-                        RecordRuntimeContext.setCurrent (box session.Runtime)
-                        try
-                            for form in read.Forms do
-                                match session.EvalForm form with
-                                | Ok value -> printfn "%s" (Print.printString value)
-                                | Error diagnostics -> renderDiagnostics source diagnostics
-                        finally
-                            RecordRuntimeContext.setCurrent previous
-                        let remainder = text.Substring(read.Position)
-                        buffer.Clear() |> ignore
-                        buffer.Append(remainder) |> ignore
-                        if String.IsNullOrWhiteSpace remainder then
-                            nextIndent <- 0
-                            processing <- false
+                elif String.IsNullOrWhiteSpace text then
+                    buffer.Clear() |> ignore
+                    nextIndent <- 0
+                else
+                    for value in result.Values do
+                        printfn "%s" (Print.printString value)
+                    buffer.Clear() |> ignore
+                    nextIndent <- 0
 
     reader.Save()
     if buffer.Length > 0 && not (String.IsNullOrWhiteSpace(buffer.ToString())) then

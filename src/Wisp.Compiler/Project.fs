@@ -400,75 +400,21 @@ module Project =
         if diagnostics.Count = 0 then Ok loaded else Error(List.ofSeq diagnostics)
 
     let private evaluateLoaded (session: Session) (loaded: LoadedSource list) =
-        let diagnostics = ResizeArray<string>()
-        let mutable lastValue = None
-
-        let evaluateSuccess item form =
-            match evaluateForm session item.Source form with
-            | Ok value ->
-                lastValue <- Some value
-                true
-            | Error errors ->
-                errors |> List.iter diagnostics.Add
-                false
-
-        for item in loaded do
-            setNamespace session item.Source.NamespaceName
-            match item.NamespaceForm with
-            | Some namespaceForm ->
-                match evaluateForm session item.Source namespaceForm with
-                | Ok _ -> ()
-                | Error errors -> errors |> List.iter diagnostics.Add
-            | None -> ()
-
-        let formsWithKind =
+        let entriesWithOwners =
             loaded
             |> List.collect (fun item ->
-                item.Forms |> List.map (fun form -> item, form, formKind form))
-
-        let pendingTypes =
-            formsWithKind
-            |> List.choose (fun (item, form, kind) ->
-                if kind = TypeForm then Some(item, form) else None)
-        let mutable typeProgress = true
-        let mutable remainingTypes = pendingTypes
-        let mutable typeErrors : (LoadedSource * obj * string list) list = []
-        while typeProgress && not remainingTypes.IsEmpty do
-            typeProgress <- false
-            let next =
-                remainingTypes
-                |> List.filter (fun (item, form) ->
-                    match evaluateForm session item.Source form with
-                    | Ok value ->
-                        lastValue <- Some value
-                        typeProgress <- true
-                        false
-                    | Error errors ->
-                        typeErrors <- (item, form, errors) :: typeErrors
-                        true)
-            remainingTypes <- next
-        if not remainingTypes.IsEmpty then
-            for item, form, errors in typeErrors |> List.rev do
-                if
-                    remainingTypes
-                    |> List.exists (fun (remainingItem, remainingForm) ->
-                        obj.ReferenceEquals(remainingItem, item)
-                        && obj.ReferenceEquals(remainingForm, form))
-                then
-                    errors |> List.iter diagnostics.Add
-
-        for kindToRun in [ MacroForm; FunctionForm ] do
-            for item, form, kind in formsWithKind do
-                if kind = kindToRun then
-                    evaluateSuccess item form |> ignore
-
-        for item, form, kind in formsWithKind do
-            match kind with
-            | ValueForm
-            | OtherForm -> evaluateSuccess item form |> ignore
-            | _ -> ()
-
-        List.ofSeq diagnostics, lastValue
+                item.Forms |> List.map (fun form -> item.Source, form))
+        let entries =
+            entriesWithOwners
+            |> List.map (fun (source, form) -> source.NamespaceName, form)
+        let output, diagnosticEntries = session.EvalEntriesDetailed entries
+        let diagnostics =
+            diagnosticEntries
+            |> List.map (fun (index, diagnostic) ->
+                let source, _ = entriesWithOwners.[index]
+                let text = SourceText.Create(source.Text, source.Path)
+                text.Render diagnostic)
+        diagnostics, List.tryLast output.Values
 
     let private buildSession (sources: ProjectSource list) (output: TextWriter) =
         match readLoadedSources sources with
