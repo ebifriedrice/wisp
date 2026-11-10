@@ -119,11 +119,14 @@ let private watchProject (state: ProjectSession) (dirty: bool ref) =
             watchers.Add watcher
     watchers
 
-let private runRepl (getSession: unit -> Session) (refresh: (bool -> Result<string list, string list>) option) =
+let private runRepl
+    (title: string option)
+    (getSession: unit -> Session)
+    (refresh: (bool -> Result<string list, string list>) option)
+    =
     let color = not Console.IsOutputRedirected
     let session = getSession ()
-    printfn "Wisp %s — Ctrl-D to exit, :help for commands" version
-    printfn "namespace: %s" session.Runtime.CurrentNamespace
+    Repl.banner version title session.Runtime.CurrentNamespace
     let reader = Repl.LineReader(historyPath (), color)
     let buffer = StringBuilder()
     let mutable running = true
@@ -135,34 +138,34 @@ let private runRepl (getSession: unit -> Session) (refresh: (bool -> Result<stri
         | Some refresh ->
             match refresh false with
             | Ok changed when not changed.IsEmpty ->
-                printfn ";; reloaded %s" (changed |> List.map Path.GetFileName |> String.concat ", ")
+                Repl.info (";; reloaded " + (changed |> List.map Path.GetFileName |> String.concat ", "))
             | Ok _ -> ()
-            | Error errors ->
-                for error in errors do eprintfn "%s" error
+            | Error errors -> for error in errors do Repl.error error
 
     while running do
         refreshNow ()
         let session = getSession ()
         let prompt = if buffer.Length = 0 then session.Runtime.CurrentNamespace + "> " else "...> "
         match reader.ReadLine(prompt, String(' ', nextIndent)) with
-        | None -> running <- false
-        | Some line ->
+        | Repl.EndOfInput -> running <- false
+        | Repl.Cancelled ->
+            buffer.Clear() |> ignore
+            nextIndent <- 0
+        | Repl.Line line ->
             if buffer.Length = 0 && line.StartsWith(":", StringComparison.Ordinal) then
                 match line.Trim() with
                 | ":quit"
                 | ":q"
                 | ":exit" -> running <- false
-                | ":help" ->
-                    printfn ":help  :reload  :quit"
+                | ":help" -> Repl.help ()
                 | ":reload" ->
                     match refresh with
                     | Some refresh ->
                         match refresh true with
-                        | Ok _ -> printfn ";; project reloaded"
-                        | Error errors -> for error in errors do eprintfn "%s" error
-                    | None -> printfn ";; no project loaded"
-                | command ->
-                    printfn "Unknown command %s; try :help" command
+                        | Ok _ -> Repl.info ";; project reloaded"
+                        | Error errors -> for error in errors do Repl.error error
+                    | None -> Repl.info ";; no project loaded"
+                | command -> Repl.error (sprintf "Unknown command %s; try :help" command)
             elif String.IsNullOrWhiteSpace line && buffer.Length = 0 then
                 ()
             else
@@ -177,7 +180,8 @@ let private runRepl (getSession: unit -> Session) (refresh: (bool -> Result<stri
                     if hasIncompleteDiagnostic result.Diagnostics then
                         ()
                     else
-                        renderDiagnostics source result.Diagnostics
+                        for diagnostic in result.Diagnostics do
+                            Repl.diagnostic source diagnostic
                         buffer.Clear() |> ignore
                         nextIndent <- 0
                 elif String.IsNullOrWhiteSpace text then
@@ -197,21 +201,16 @@ let private runRepl (getSession: unit -> Session) (refresh: (bool -> Result<stri
     0
 
 let private runProjectRepl (path: string) =
-    let interactive = not Console.IsInputRedirected && not Console.IsOutputRedirected
     match findProjectFile path with
     | None ->
         eprintfn "wisp: project file not found: %s" path
         1
     | Some projectPath ->
-        let buffer = if interactive then Some(new Tui.BufferWriter()) else None
-        let output = buffer |> Option.map (fun writer -> writer :> TextWriter) |> Option.defaultValue Console.Out
-        match Project.openSession projectPath output with
+        match Project.openSession projectPath Console.Out with
         | Error errors ->
             for error in errors do eprintfn "%s" error
             1
         | Ok state ->
-            if not interactive then
-                printfn "Loaded project %s" state.Root.Name
             let session = state.Session
             session.Runtime.CurrentNamespace <- state.Root.RootNamespace
             let dirty = ref false
@@ -225,14 +224,7 @@ let private runProjectRepl (path: string) =
                 else
                     Ok []
             try
-                match buffer with
-                | Some buffer ->
-                    Tui.run
-                        (sprintf "Wisp — %s" state.Root.Name)
-                        (fun () -> state.Session)
-                        (Some refresh)
-                        buffer
-                | None -> runRepl (fun () -> state.Session) (Some refresh) |> ignore
+                runRepl (Some state.Root.Name) (fun () -> state.Session) (Some refresh) |> ignore
             finally
                 for watcher in watchers do
                     watcher.EnableRaisingEvents <- false
@@ -319,14 +311,8 @@ let main argv =
     | [ "run"; path ] ->
         runProject path true
     | [ "repl" ] ->
-        if not Console.IsInputRedirected && not Console.IsOutputRedirected then
-            let buffer = new Tui.BufferWriter()
-            let session = Session(output = buffer)
-            Tui.run "Wisp" (fun () -> session) None buffer
-            0
-        else
-            let session = Session(renderMarkdown = not Console.IsOutputRedirected)
-            runRepl (fun () -> session) None
+        let session = Session(renderMarkdown = not Console.IsOutputRedirected)
+        runRepl None (fun () -> session) None
     | [ "repl"; path ] ->
         runProjectRepl path
     | [ "templates" ] ->
@@ -338,14 +324,8 @@ let main argv =
     | [ path ] when not (path.StartsWith("-", StringComparison.Ordinal)) ->
         runFile path
     | [] ->
-        if not Console.IsInputRedirected && not Console.IsOutputRedirected then
-            let buffer = new Tui.BufferWriter()
-            let session = Session(output = buffer)
-            Tui.run "Wisp" (fun () -> session) None buffer
-            0
-        else
-            let session = Session(renderMarkdown = not Console.IsOutputRedirected)
-            runRepl (fun () -> session) None
+        let session = Session(renderMarkdown = not Console.IsOutputRedirected)
+        runRepl None (fun () -> session) None
     | _ ->
         usage ()
         2

@@ -16,12 +16,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Repl.fs" />
-    <Compile Include="Tui.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Terminal.Gui" Version="2.4.17" />
-    <PackageReference Include="Terminal.Gui.Editor" Version="2.5.7" />
+    <PackageReference Include="Spectre.Console" Version="0.57.2" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Wisp.Core/Wisp.Core.fsproj" />
