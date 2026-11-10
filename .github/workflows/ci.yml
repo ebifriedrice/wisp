@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [ bootstrap, main ]
+  pull_request:
+    branches: [ bootstrap, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+            11.0.x
+          dotnet-quality: preview
+      - name: Restore
+        run: dotnet restore Wisp.slnx
+      - name: Build
+        run: dotnet build Wisp.slnx -c Release --no-restore
+      - name: Test
+        run: dotnet test Wisp.slnx -c Release --no-build
+      - name: Pack tool and SDK
+        run: |
+          dotnet pack src/Wisp.Cli/Wisp.Cli.fsproj -c Release -o artifacts/nuget
+          dotnet pack sdk/Wisp.Sdk/Wisp.Sdk.csproj -c Release -o artifacts/nuget
+      - name: Install CLI tool
+        run: dotnet tool install --tool-path artifacts/tools --add-source artifacts/nuget Wisp.Cli --version 0.1.0-bootstrap
+      - name: Run project sample
+        run: artifacts/tools/wisp run samples/projects/app/app.wisp.proj
+      - name: Test MSBuild SDK
+        run: bash eng/test-sdk.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/nuget/*.nupkg

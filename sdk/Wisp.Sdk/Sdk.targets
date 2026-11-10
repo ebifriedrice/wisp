@@ -1,0 +1,15 @@
+<Project>
+  <Target Name="WispBuild">
+    <Exec Command="&quot;$(WispTool)&quot; build &quot;$(WispProject)&quot;" />
+  </Target>
+
+  <Target Name="WispRun" DependsOnTargets="WispBuild">
+    <Exec Command="&quot;$(WispTool)&quot; run &quot;$(WispProject)&quot;" />
+  </Target>
+
+  <Target Name="Wisp" DependsOnTargets="WispRun" />
+
+  <Target Name="Build" DependsOnTargets="WispBuild" />
+  <Target Name="Rebuild" DependsOnTargets="WispBuild" />
+  <Target Name="Clean" />
+</Project>

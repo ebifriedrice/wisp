@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Wisp.Core/Wisp.Core.fsproj" />
+    <Project Path="src/Wisp.Syntax/Wisp.Syntax.fsproj" />
+    <Project Path="src/Wisp.Reader/Wisp.Reader.fsproj" />
+    <Project Path="src/Wisp.Compiler/Wisp.Compiler.fsproj" />
+    <Project Path="src/Wisp.Cli/Wisp.Cli.fsproj" />
+  </Folder>
+  <Folder Name="/sdk/">
+    <Project Path="sdk/Wisp.Sdk/Wisp.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Wisp.Tests/Wisp.Tests.fsproj" />
+  </Folder>
+</Solution>

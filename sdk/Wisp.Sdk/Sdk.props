@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <WispTool Condition="'$(WispTool)' == ''">wisp</WispTool>
+    <WispProject Condition="'$(WispProject)' == ''">$(MSBuildProjectFullPath)</WispProject>
+  </PropertyGroup>
+</Project>
