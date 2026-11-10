@@ -1689,6 +1689,23 @@ module Desugar =
                                         |> Option.bind (fun metadata -> metadata.TryGet typeHintTag)
                                     match hint with
                                     | Some hint ->
+                                        let hintName =
+                                            match hint with
+                                            | :? Symbol as hintSymbol -> Some(Clr.symbolTypeName hintSymbol)
+                                            | :? Keyword as hintKeyword -> Some hintKeyword.Name
+                                            | :? string as hintText -> Some hintText
+                                            | _ -> None
+                                        match hintName with
+                                        | Some name ->
+                                            match UnionRegistry.unionOf name with
+                                            | Some _ -> unionDomain <- unionDomain.Add name
+                                            | None ->
+                                                match UnionRegistry.casesOf name with
+                                                | Some cases ->
+                                                    for caseName in cases do
+                                                        unionDomain <- unionDomain.Add caseName
+                                                | None -> ()
+                                        | None -> ()
                                         match resolveHintNow context hint with
                                         | Ok(Some clrType) when clrType = typeof<bool> ->
                                             booleanDomain <- booleanDomain.Add(true).Add(false)
@@ -1744,7 +1761,18 @@ module Desugar =
                                     UnionRegistry.casesOf unionName
                                     |> Option.defaultValue []
                                 let missing =
-                                    allCases |> List.filter (fun caseName -> not (unionCases.Contains caseName))
+                                    allCases
+                                    |> List.filter (fun caseName ->
+                                        if unionCases.Contains caseName then
+                                            false
+                                        else
+                                            match context.ResolveTypeName caseName with
+                                            | Some caseType ->
+                                                coveredTypes
+                                                |> Seq.exists (fun clrType ->
+                                                    clrType = caseType || clrType.IsAssignableFrom caseType)
+                                                |> not
+                                            | None -> true)
                                 let coveredByType =
                                     match context.ResolveTypeName unionName with
                                     | Some unionType ->

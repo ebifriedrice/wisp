@@ -1069,6 +1069,9 @@ type CompilerTests() =
         |> ignore
 
         eval (sprintf "(defn typedUnion [v] (match v (^%s value :shape)))" unionName) |> ignore
+        eval (sprintf "(defn typedCases [v] (match v (^%s a :a) (^%s b :b)))" caseA caseB) |> ignore
+        let typedMissing = failed (sprintf "(defn typedMissing [v] (match v (^%s a :a)))" caseA)
+        Assert.Equal("WISP3044", typedMissing.Code)
         eval "(defn catchAll [v] (match v (value :any)))" |> ignore
 
         let booleanError = failed "(defn missingBool [v] (match v (true :yes)))"
