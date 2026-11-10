@@ -24,7 +24,7 @@ to GitHub Packages:
 ```bash
 dotnet tool install --global Wisp.Cli \
   --add-source https://nuget.pkg.github.com/ebifriedrice/index.json \
-  --version 0.1.4-bootstrap
+  --version 0.1.5-bootstrap
 wisp --version
 ```
 
