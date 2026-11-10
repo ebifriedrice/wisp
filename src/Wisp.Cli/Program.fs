@@ -7,7 +7,7 @@ open Wisp.Core
 open Wisp.Reader
 open Wisp.Compiler
 
-let private version = "0.1.0"
+let private version = "0.1.1-bootstrap"
 
 let private usage () =
     printfn "wisp %s" version
@@ -16,6 +16,10 @@ let private usage () =
     printfn "  wisp <file.wisp>          Evaluate a source file"
     printfn "  wisp build [project]      Build a Wisp project"
     printfn "  wisp run [project]        Run a Wisp project"
+    printfn "  wisp repl [project]       Start the REPL, optionally with a project"
+    printfn "  wisp init [dir]           Create a project from a template"
+    printfn "  wisp new <name>           Create a directory and project from a template"
+    printfn "  wisp templates            List project templates"
     printfn "  wisp --eval <form>        Evaluate a form and print its value"
     printfn "  wisp                      Start the REPL"
     printfn "  wisp --help"
@@ -82,75 +86,281 @@ let private runProject (path: string) (execute: bool) =
             for error in errors do eprintfn "%s" error
             1
 
-let private runRepl () =
-    let session = Session(renderMarkdown = not Console.IsOutputRedirected)
-    printfn "Wisp %s — Ctrl-D to exit" version
+let private historyPath () =
+    let home = Environment.GetFolderPath Environment.SpecialFolder.UserProfile
+    if String.IsNullOrWhiteSpace home then Path.Combine(Path.GetTempPath(), ".wisp_history")
+    else Path.Combine(home, ".wisp_history")
+
+let private watchProject (state: ProjectSession) (dirty: bool ref) =
+    let watchers = ResizeArray<FileSystemWatcher>()
+    let directories =
+        state.Projects
+        |> List.map (fun project -> project.Directory)
+        |> List.distinct
+    for directory in directories do
+        if Directory.Exists directory then
+            let watcher = new FileSystemWatcher(directory, "*.*")
+            watcher.IncludeSubdirectories <- true
+            watcher.NotifyFilter <-
+                NotifyFilters.LastWrite
+                ||| NotifyFilters.FileName
+                ||| NotifyFilters.DirectoryName
+                ||| NotifyFilters.Size
+            let changed (_: obj) (args: FileSystemEventArgs) =
+                if args.FullPath.EndsWith(".wisp", StringComparison.Ordinal)
+                   || args.FullPath.EndsWith(".wisp.proj", StringComparison.Ordinal) then
+                    dirty.Value <- true
+            let renamed (_: obj) (_: RenamedEventArgs) = dirty.Value <- true
+            watcher.Changed.AddHandler(FileSystemEventHandler changed)
+            watcher.Created.AddHandler(FileSystemEventHandler changed)
+            watcher.Deleted.AddHandler(FileSystemEventHandler changed)
+            watcher.Renamed.AddHandler(RenamedEventHandler renamed)
+            watcher.EnableRaisingEvents <- true
+            watchers.Add watcher
+    watchers
+
+let private runRepl (getSession: unit -> Session) (refresh: (bool -> Result<string list, string list>) option) =
+    let color = not Console.IsOutputRedirected
+    let session = getSession ()
+    printfn "Wisp %s — Ctrl-D to exit, :help for commands" version
+    printfn "namespace: %s" session.Runtime.CurrentNamespace
+    let reader = Repl.LineReader(historyPath (), color)
     let buffer = StringBuilder()
     let mutable running = true
+    let mutable nextIndent = 0
+
+    let refreshNow () =
+        match refresh with
+        | None -> ()
+        | Some refresh ->
+            match refresh false with
+            | Ok changed when not changed.IsEmpty ->
+                printfn ";; reloaded %s" (changed |> List.map Path.GetFileName |> String.concat ", ")
+            | Ok _ -> ()
+            | Error errors ->
+                for error in errors do eprintfn "%s" error
+
     while running do
-        if buffer.Length = 0 then Console.Write "wisp> " else Console.Write "...> "
-        match Console.ReadLine() with
-        | null ->
-            running <- false
-        | line ->
-            if buffer.Length > 0 then buffer.AppendLine() |> ignore
-            buffer.Append(line) |> ignore
-            let mutable processing = true
-            while processing && buffer.Length > 0 do
-                let text = buffer.ToString()
-                let source = SourceText.Create(text, "<repl>")
-                let read = Reader.readFormsFrom source session.ReaderOptions 0
-                if not read.Diagnostics.IsEmpty then
-                    if hasIncompleteDiagnostic read.Diagnostics then
+        refreshNow ()
+        let session = getSession ()
+        let prompt = if buffer.Length = 0 then session.Runtime.CurrentNamespace + "> " else "...> "
+        match reader.ReadLine(prompt, String(' ', nextIndent)) with
+        | None -> running <- false
+        | Some line ->
+            if buffer.Length = 0 && line.StartsWith(":", StringComparison.Ordinal) then
+                match line.Trim() with
+                | ":quit"
+                | ":q"
+                | ":exit" -> running <- false
+                | ":help" ->
+                    printfn ":help  :reload  :quit"
+                | ":reload" ->
+                    match refresh with
+                    | Some refresh ->
+                        match refresh true with
+                        | Ok _ -> printfn ";; project reloaded"
+                        | Error errors -> for error in errors do eprintfn "%s" error
+                    | None -> printfn ";; no project loaded"
+                | command ->
+                    printfn "Unknown command %s; try :help" command
+            elif String.IsNullOrWhiteSpace line && buffer.Length = 0 then
+                ()
+            else
+                if buffer.Length > 0 then buffer.AppendLine() |> ignore
+                buffer.Append(line) |> ignore
+                nextIndent <- Repl.nextIndent line
+                let mutable processing = true
+                while processing && buffer.Length > 0 do
+                    let text = buffer.ToString()
+                    let source = SourceText.Create(text, "<repl>")
+                    let session = getSession ()
+                    let read = Reader.readFormsFrom source session.ReaderOptions 0
+                    if not read.Diagnostics.IsEmpty then
+                        if hasIncompleteDiagnostic read.Diagnostics then
+                            processing <- false
+                        else
+                            renderDiagnostics source read.Diagnostics
+                            buffer.Clear() |> ignore
+                            nextIndent <- 0
+                            processing <- false
+                    elif read.Forms.IsEmpty then
+                        buffer.Clear() |> ignore
+                        nextIndent <- 0
                         processing <- false
                     else
-                        renderDiagnostics source read.Diagnostics
+                        let previous = RecordRuntimeContext.getCurrent ()
+                        RecordRuntimeContext.setCurrent (box session.Runtime)
+                        try
+                            for form in read.Forms do
+                                match session.EvalForm form with
+                                | Ok value -> printfn "%s" (Print.printString value)
+                                | Error diagnostics -> renderDiagnostics source diagnostics
+                        finally
+                            RecordRuntimeContext.setCurrent previous
+                        let remainder = text.Substring(read.Position)
                         buffer.Clear() |> ignore
-                        processing <- false
-                elif read.Forms.IsEmpty then
-                    buffer.Clear() |> ignore
-                    processing <- false
-                else
-                    for form in read.Forms do
-                        match session.EvalForm form with
-                        | Ok value -> printfn "%s" (Print.printString value)
-                        | Error diagnostics -> renderDiagnostics source diagnostics
-                    let remainder = text.Substring(read.Position)
-                    buffer.Clear() |> ignore
-                    buffer.Append(remainder) |> ignore
-                    if String.IsNullOrWhiteSpace remainder then processing <- false
+                        buffer.Append(remainder) |> ignore
+                        if String.IsNullOrWhiteSpace remainder then
+                            nextIndent <- 0
+                            processing <- false
 
+    reader.Save()
     if buffer.Length > 0 && not (String.IsNullOrWhiteSpace(buffer.ToString())) then
         let source = SourceText.Create(buffer.ToString(), "<repl>")
-        let read = Reader.readFormsFrom source session.ReaderOptions 0
+        let read = Reader.readFormsFrom source (getSession()).ReaderOptions 0
         if not read.Diagnostics.IsEmpty then renderDiagnostics source read.Diagnostics
+    0
+
+let private runProjectRepl (path: string) =
+    let interactive = not Console.IsInputRedirected && not Console.IsOutputRedirected
+    match findProjectFile path with
+    | None ->
+        eprintfn "wisp: project file not found: %s" path
+        1
+    | Some projectPath ->
+        let buffer = if interactive then Some(new Tui.BufferWriter()) else None
+        let output = buffer |> Option.map (fun writer -> writer :> TextWriter) |> Option.defaultValue Console.Out
+        match Project.openSession projectPath output with
+        | Error errors ->
+            for error in errors do eprintfn "%s" error
+            1
+        | Ok state ->
+            if not interactive then
+                printfn "Loaded project %s" state.Root.Name
+            let session = state.Session
+            session.Runtime.CurrentNamespace <- state.Root.RootNamespace
+            let dirty = ref false
+            let watchers = watchProject state dirty
+            let refresh (force: bool) =
+                if force || dirty.Value then
+                    dirty.Value <- false
+                    let result = Project.refresh state
+                    state.Session.Runtime.CurrentNamespace <- state.Root.RootNamespace
+                    result
+                else
+                    Ok []
+            try
+                match buffer with
+                | Some buffer ->
+                    Tui.run
+                        (sprintf "Wisp — %s" state.Root.Name)
+                        (fun () -> state.Session)
+                        (Some refresh)
+                        buffer
+                | None -> runRepl (fun () -> state.Session) (Some refresh) |> ignore
+            finally
+                for watcher in watchers do
+                    watcher.EnableRaisingEvents <- false
+                    watcher.Dispose()
+
+            0
+
+let private parseTemplateOptions (arguments: string list) =
+    let mutable template = "app"
+    let mutable name = None
+    let mutable force = false
+    let positional = ResizeArray<string>()
+    let rec loop remaining =
+        match remaining with
+        | [] -> ()
+        | "--template" :: value :: rest ->
+            template <- value
+            loop rest
+        | "--name" :: value :: rest ->
+            name <- Some value
+            loop rest
+        | "--force" :: rest ->
+            force <- true
+            loop rest
+        | value :: rest ->
+            positional.Add value
+            loop rest
+    loop arguments
+    template, name, force, positional |> Seq.toList
+
+let private initProject (arguments: string list) (newProject: bool) =
+    let template, name, force, positional = parseTemplateOptions arguments
+    let directory =
+        if newProject then
+            match positional with
+            | [ value ] -> value
+            | _ ->
+                eprintfn "wisp: new expects a directory name"
+                ""
+        else
+            match positional with
+            | [] -> "."
+            | [ value ] -> value
+            | _ ->
+                eprintfn "wisp: init expects at most one directory"
+                ""
+    if String.IsNullOrWhiteSpace directory then
+        2
+    else
+        match Templates.create directory name template force with
+        | Ok files ->
+            printfn "Created %s project in %s" template (Path.GetFullPath directory)
+            for file in files do printfn "  %s" (Path.GetRelativePath(Path.GetFullPath directory, file))
+            0
+        | Error errors ->
+            for error in errors do eprintfn "wisp: %s" error
+            1
+
+let private listTemplates () =
+    for template in Templates.list do
+        printfn "%-10s %s" template.Name template.Description
     0
 
 [<EntryPoint>]
 let main argv =
-    match argv with
-    | [| "--help" |]
-    | [| "-h" |] ->
+    match List.ofArray argv with
+    | [ "--help" ]
+    | [ "-h" ] ->
         usage ()
         0
-    | [| "--version" |] ->
+    | [ "--version" ] ->
         printfn "%s" version
         0
-    | [| "--eval"; code |]
-    | [| "-e"; code |] ->
+    | [ "--eval"; code ]
+    | [ "-e"; code ] ->
         let source = SourceText.Create(code, "<eval>")
         evaluate (Session()) source true
-    | [| "build" |] ->
+    | [ "build" ] ->
         runProject "." false
-    | [| "build"; path |] ->
+    | [ "build"; path ] ->
         runProject path false
-    | [| "run" |] ->
+    | [ "run" ] ->
         runProject "." true
-    | [| "run"; path |] ->
+    | [ "run"; path ] ->
         runProject path true
-    | [| path |] when not (path.StartsWith("-", StringComparison.Ordinal)) ->
+    | [ "repl" ] ->
+        if not Console.IsInputRedirected && not Console.IsOutputRedirected then
+            let buffer = new Tui.BufferWriter()
+            let session = Session(output = buffer)
+            Tui.run "Wisp" (fun () -> session) None buffer
+            0
+        else
+            let session = Session(renderMarkdown = not Console.IsOutputRedirected)
+            runRepl (fun () -> session) None
+    | [ "repl"; path ] ->
+        runProjectRepl path
+    | [ "templates" ] ->
+        listTemplates ()
+    | "init" :: arguments ->
+        initProject arguments false
+    | "new" :: arguments ->
+        initProject arguments true
+    | [ path ] when not (path.StartsWith("-", StringComparison.Ordinal)) ->
         runFile path
-    | [| |] -> runRepl ()
+    | [] ->
+        if not Console.IsInputRedirected && not Console.IsOutputRedirected then
+            let buffer = new Tui.BufferWriter()
+            let session = Session(output = buffer)
+            Tui.run "Wisp" (fun () -> session) None buffer
+            0
+        else
+            let session = Session(renderMarkdown = not Console.IsOutputRedirected)
+            runRepl (fun () -> session) None
     | _ ->
         usage ()
         2

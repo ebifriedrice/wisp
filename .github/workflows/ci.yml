@@ -28,7 +28,7 @@ jobs:
           dotnet pack src/Wisp.Cli/Wisp.Cli.fsproj -c Release -o artifacts/nuget
           dotnet pack sdk/Wisp.Sdk/Wisp.Sdk.csproj -c Release -o artifacts/nuget
       - name: Install CLI tool
-        run: dotnet tool install --tool-path artifacts/tools --add-source artifacts/nuget Wisp.Cli --version 0.1.0-bootstrap
+        run: dotnet tool install --tool-path artifacts/tools --add-source artifacts/nuget Wisp.Cli --version 0.1.1-bootstrap
       - name: Run project sample
         run: artifacts/tools/wisp run samples/projects/app/app.wisp.proj
       - name: Test MSBuild SDK
