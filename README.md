@@ -1,147 +1,196 @@
 # Wisp
 
-A tiny Clojure-shaped Lisp for .NET with native CLR interop, persistent data
-structures, a lossless incremental syntax tree, a nanopass compiler, and a
-REPL that hot-reloads definitions.
+A tiny Clojure-shaped Lisp for .NET with persistent data, native CLR interop,
+a lossless syntax tree, a nanopass compiler, and a project-aware REPL that hot
+reloads changed files.
 
-## Quick start
+## 1. Get Wisp
 
-```bash
-dotnet test Wisp.slnx
-dotnet run --project src/Wisp.Cli -- --eval "(+ 1 2 3)"
-dotnet run --project src/Wisp.Cli -- samples/hello.wisp
-```
+Requirements:
 
-REPL:
+- .NET 10 or .NET 11 SDK.
+- A terminal for the TUI REPL.
 
-```bash
-dotnet run --project src/Wisp.Cli --
-```
-
-Single-file framework-dependent publish:
+Build from the repository:
 
 ```bash
-dotnet publish src/Wisp.Cli/Wisp.Cli.fsproj -c Release -r linux-x64 \
-  --self-contained false /p:PublishSingleFile=true -o artifacts/publish
-artifacts/publish/wisp --eval "(System.Math/Abs -42)"
+dotnet build Wisp.slnx
+dotnet run --project src/Wisp.Cli -- --version
 ```
 
-## Projects
-
-Wisp projects are XML manifests ending in `.wisp.proj`:
-
-```xml
-<Project>
-  <PropertyGroup>
-    <Name>demo.app</Name>
-    <RootNamespace>demo.app</RootNamespace>
-    <StartupObject>demo.app/main</StartupObject>
-  </PropertyGroup>
-  <ItemGroup>
-    <Wisp Include="src/**/*.wisp" />
-    <ProjectReference Include="../math/math.wisp.proj" />
-  </ItemGroup>
-</Project>
-```
+The CLI is also published as the `Wisp.Cli` dotnet tool and the build integration
+as the `Wisp.Sdk` MSBuild SDK. Both are attached to GitHub releases and published
+to GitHub Packages:
 
 ```bash
-dotnet build src/Wisp.Cli/Wisp.Cli.fsproj
-dotnet run --project src/Wisp.Cli --no-build -- build samples/projects/app/app.wisp.proj
-dotnet run --project src/Wisp.Cli --no-build -- run   samples/projects/app/app.wisp.proj
+dotnet tool install --global Wisp.Cli \
+  --add-source https://nuget.pkg.github.com/ebifriedrice/index.json \
+  --version 0.1.1-bootstrap
+wisp --version
 ```
 
-Scaffold a new project from a built-in template:
+## 2. Create a project
 
 ```bash
 wisp new hello
+cd hello
+wisp run wisp.proj
+```
+
+Output:
+
+```text
+Hello from hello!
+```
+
+Available templates:
+
+```text
+app        A console application with a startup function.
+lib        A library project with one public function.
+workspace  An application project referencing a library project.
+```
+
+```bash
 wisp init my-lib --template lib
 wisp init my-app --template workspace
 wisp templates
 ```
 
-Start a project-aware REPL:
+A template creates a `.wisp.proj` manifest, source files, and, for a workspace,
+a library project with a `ProjectReference`.
 
-```bash
-wisp repl samples/projects/app/app.wisp.proj
+## 3. Project layout
+
+```text
+hello/
+  wisp.proj
+  src/
+    main.wisp
 ```
 
-The TUI REPL uses a real multiline editor with clipboard, undo/redo, syntax
-highlighting, history, and `F5` evaluation. It watches project sources and
-manifests, reloading changed function files in place and rebuilding the session
-when types or the project graph change.
+`wisp.proj`:
 
-Project loading uses a declaration pass for namespaces, types, macros, and
-functions, so no `declare` forms are needed for forward references. Referenced
-projects load first and share one runtime. The CLI ships as the `Wisp.Cli`
-dotnet tool, and `Wisp.Sdk` provides MSBuild targets for `dotnet msbuild`.
+```xml
+<Project>
+  <PropertyGroup>
+    <Name>hello</Name>
+    <RootNamespace>hello</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <StartupObject>hello/main</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Wisp Include="src/**/*.wisp" />
+  </ItemGroup>
+</Project>
+```
 
-See [the documentation index](docs/README.md) for tutorials, how-to guides,
-reference, and explanations.
-
-## Language examples
+`src/main.wisp`:
 
 ```clojure
-(ns demo.app)
+(ns hello)
 
+(defn main []
+  (println "Hello from hello!"))
+```
+
+A library project adds `ProjectReference` to the consuming project:
+
+```xml
+<ProjectReference Include="../lib/lib.wisp.proj" />
+```
+
+Project references load first, share one runtime, and resolve namespaces through
+ordinary `:require`/`:use` forms:
+
+```clojure
+(ns demo.app
+  (:require [demo.math :as math]))
+
+(println (math/add 20 22))
+```
+
+## 4. Build, run, and REPL
+
+```bash
+wisp build wisp.proj
+wisp run wisp.proj
+```
+
+From the repository, use `dotnet run --project src/Wisp.Cli --no-build -- ...`.
+
+Start a REPL:
+
+```bash
+wisp repl
+wisp repl path/to/project/wisp.proj
+```
+
+The interactive REPL uses a Terminal.Gui editor with multiline editing, selection,
+clipboard, undo/redo, Wisp syntax highlighting, and a read-only transcript.
+
+| Key | Action |
+|---|---|
+| `F5` / `Ctrl+Enter` | Evaluate the editor contents |
+| `Ctrl+/` | Show key help |
+| `Alt+Up` / `Alt+Down` | Previous / next expression history |
+| `Ctrl+Q` | Quit |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
+| `Ctrl+A` | Select all |
+
+When stdin or stdout is redirected, the CLI falls back to a line-oriented REPL
+with persisted history (`~/.wisp_history`).
+
+### Hot reload
+
+A project REPL watches every project directory and `*.wisp.proj` manifest:
+
+- changed function or value files reload only those files;
+- changed types, namespace dependencies, manifests, added files, or removed
+  files trigger a full reload;
+- dependency project changes are watched and reloaded too;
+- `:reload` forces a refresh.
+
+See [the CLI reference](docs/reference/cli.md) for all commands and REPL keys.
+
+## 5. First program
+
+```clojure
+(ns hello)
+
+(def answer 42)
+
+(defn add [a b]
+  (+ a b))
+
+(let [x 2
+      y (+ x 3)]
+  [x y (add x y)])
+
+(println "answer:" answer)
+```
+
+Values print as Clojure-shaped data:
+
+```clojure
+{:name "Wisp" :versions [10 11]}
+#{:a :b}
+'(1 2 3)
+```
+
+Persistent collections, metadata, keywords, symbols, namespaces, vars, ratios,
+lazy sequences, reader conditionals, tagged literals, and syntax quote are
+available through `Wisp.Core` and `Wisp.Reader`.
+
+## 6. Functions and control flow
+
+```clojure
 (defn fact [n]
   (if (= n 0)
     1
     (* n (fact (- n 1)))))
 
-(println "6! =" (fact 6))
-
-(let [x 2
-      y (+ x 3)]
-  [x y (* x y)])
-
-(defmacro unless [test then else]
-  (list 'if test else then))
-
-(println (unless false "no" "yes"))
-```
-
-Persistent collections, metadata, keywords, namespaces, ratios, lazy sequences,
-reader macros, and tagged literals are available through `Wisp.Core` and
-`Wisp.Reader`.
-
-## Destructuring
-
-Vector and map patterns work in `let`, `fn`/`defn` parameters, and `loop`
-bindings:
-
-```clojure
-(let [[a b & rest] [1 2 3 4]]
-  [a b rest])
-
-(let [{:keys [a b] :or {b 9} :as m} {:a 1}]
-  [a b m])
-
-(defn add-pair [[a b]]
-  (+ a b))
-
-(loop [[i acc] [0 0]]
-  (if (= i 4) acc (recur [(inc i) (+ acc i)])))
-```
-
-Patterns can nest, use `&` rest bindings and `:as`, and map patterns support
-`:keys`, `:strs`, `:syms`, `:or`, and `:as`. Invalid patterns report `WISP3029`
-with a source span.
-
-## Macros
-
-```clojure
-(defmacro unless [test then else]
-  `(if ~test ~else ~then))
-
-(unless false "no" "yes")
-
-(defmacro all [& forms]
-  `(do ~@forms))
-```
-
-Loop/recur and try/catch:
-
-```clojure
 (loop [i 0 acc 0]
   (if (= i 10)
     acc
@@ -153,168 +202,101 @@ Loop/recur and try/catch:
   (catch System.InvalidOperationException e (.-Message e))
   (catch System.Exception e :other)
   (finally (println "cleanup")))
-
-(defn factorial [n acc]
-  (if (= n 0)
-    acc
-    (recur (dec n) (* acc n))))
 ```
 
-`recur` is validated to be in tail position and rebinds either the enclosing
-loop or function parameters.
+`recur` must be in tail position and match its enclosing loop or function arity.
+Typed catches match CLR assignability in source order; an untyped catch must be
+last.
 
-Catch clauses are typed with `(catch Type binding body...)` or untyped with
-`(catch binding body...)`. Typed clauses match by CLR assignability in source
-order, so the first matching clause wins; `Exception` matches everything. An
-untyped catch catches all remaining exceptions and must be the last catch
-clause (`WISP3031` otherwise). Catch types must resolve to an exception type,
-reported as `WISP3030` with the type form's source span. `throw` rethrows a
-given `Exception` object unchanged, preserving its runtime type.
-
-Syntax quote expands at read time to builder forms using `concat`, `list`,
-`apply`, `vector`, `hash-map`, and `hash-set`. It supports `~`, `~@`, and
-auto-gensyms (`x#`). Nested syntax quotes expand inside-out: the inner expansion
-becomes data for the outer quote, and `~~` escapes both levels. Map templates
-support `~@` at the flat key/value argument level, so a splice can supply a
-value and the following key. Reader conditionals select on the configured
-feature set (`:wisp` and `:clr` by default) with `:default` fallback; `#?@`
-splices inside lists, vectors, maps, and sets. Splicing also works after reader
-prefixes: quote, var-quote, deref, and unquote distribute over each selected
-item, metadata applies to every item, syntax quote expands each item, and
-discard drops them all.
-
-Macros receive raw forms, expand recursively, and retain invocation spans. Macro
-failures and compiler errors after expansion carry an expansion trace in their
-notes (`macro user/unless: ... => ...`). Macro vars can be redefined in the REPL.
-
-## Definitions and methods
-
-`defstruct`, `defclass`, and `definterface` declare types. Type hints use
-C#-shaped symbols, not keywords:
+### Destructuring
 
 ```clojure
-(definterface IShape
-  (^double Area [this]))
+(let [[a b & rest] [1 2 3 4]]
+  [a b rest])
 
-(defclass Circle [^double radius]
-  (implements IShape))
+(let [{:keys [a b] :or {b 9} :as m} {:a 1}]
+  [a b m])
 
-(defstruct Point [^double x ^double y])
-
-(defmethod IShape.Area [^Circle this]
-  (* System.Math/PI (.-radius this) (.-radius this)))
-
-(defmethod Circle.Diameter [^Circle this]
-  (* 2.0 (.-radius this)))
-
-; Receiver hint infers the owning class when no target is given.
-(defmethod Circumference [^Circle this]
-  (* 2.0 System.Math/PI (.-radius this)))
+(defn add-pair [[a b]]
+  (+ a b))
 ```
 
-- `Circle.Area` applies to the class; `IShape.Area` applies to the interface and
-  uses the `^Circle` receiver hint to join the implementation to `Circle`.
-- Method visibility is `^:private` or public by default. Private methods are
-  rejected when called from another namespace.
-- Interface members declared with a receiver first parameter (`[this ...]`)
-  exclude that receiver from the emitted CLR signature.
+Vector and map patterns work in `let`, function parameters, and `loop`
+bindings, including nesting, `&`, `:as`, `:keys`, `:strs`, `:syms`, and `:or`.
 
-Constructors use the class/struct name itself:
+## 7. Macros
 
 ```clojure
-(defclass Pair [a b])
+(defmacro unless [test then else]
+  `(if ~test ~else ~then))
 
-; Default constructor takes a field map.
-(def p (Pair {:a 1 :b 2}))
+(unless false "no" "yes")
 
-; Override with one or more constructor defmethods. The body returns a field map.
-(defmethod Pair [a b] {:a a :b b})
-(defmethod Pair [a] {:a a :b (* a 2)})
-
-(Pair 3 4)   ; matches the two-argument constructor
-(Pair 5)     ; matches the one-argument constructor
+(defmacro all [& forms]
+  `(do ~@forms))
 ```
 
-Fields can be typed, and generic definitions use a C#-shaped header:
+Syntax quote expands at read time to builder forms and supports `~`, `~@`, and
+auto-gensyms (`x#`). Macros receive raw forms, expand recursively, and retain
+invocation spans; failures carry an expansion trace.
+
+## 8. Namespaces and declarations
 
 ```clojure
-(defclass [Box T (where [IComparable T])]
-  [^T value])
+(ns demo.lib "A demo library.")
+(def answer 42)
 
-(def b (new [Box Int] 42))
-(.-value b)        ; System.Int32
+(ns demo.app
+  "The demo application."
+  (:import [System.Text StringBuilder])
+  (:require [demo.lib :as lib :refer [answer]]))
 
-(defclass [Assoc K V (where [IComparable K])]
-  [^[Dictionary [K V]] data])
+(def sb (StringBuilder. "wisp"))
+(lib/answer)
+answer
 
-(defclass Holder [^[List [IComparable]] items])
+(ns demo.uses (:use demo.lib))
+(ns demo.only (:use [demo.lib :only [answer]]))
 ```
 
-`(inherits Base)` supports a custom `WispRecordBase` subtype exposing a
-`(string, string[], obj[])` constructor; invalid bases report `WISP3032`.
-`defstruct` emits a real CLR value type (`System.ValueType`) with value
-equality, printing, methods, and interface dispatch; it cannot inherit. Invalid
-interfaces report `WISP3033`.
+Imports and aliases are namespace-scoped. `:refer` and `:use` add referrals;
+`:use` skips `^:private` vars. `(in-ns 'demo.other)` switches the session
+namespace.
 
-The old `deftype` is now an alias for `defclass`; explicit
-`(defmethod Type :name ...)` targets, keyword-headed hints (`[:List :Int]`), and
-`->Type` constructors remain supported but are deprecated.
+Project loading uses declaration-oriented passes over all source files:
+namespaces first, then types (with retries for forward type references), then
+macros and functions, then values and methods. No `declare` form is needed for
+forward references across files or projects.
 
-## Documentation
+## 9. Documentation in the language
 
-Definition forms accept Markdown docstrings after the name. The REPL renders
-headings, emphasis, lists, code blocks, and links; other outputs render the same
-text without ANSI styling.
+Definition forms accept Markdown docstrings:
 
-````clojure
+```clojure
 (ns demo.app "The **demo** application.")
-
-(def answer "The answer to everything." 42)
 
 (defn add
   "Adds **two** numbers.
 
-  ## Details
-
-  See `sub` for subtraction.
-
-  ```clojure
-  (add 1 2)
-  ```"
+  See `sub` for subtraction."
   [a b]
   (+ a b))
 
 (defclass Person "A person with a name." [^String name])
-
-(defstruct Point "A 2D point." [^int x ^int y])
-
-(definterface Greeter "Something that can greet."
-  (^String Greet [this]))
-
-(defdelegate ^int IntUnary "An int transform." [^int x])
-
-(defunion Shape "A shape."
-  (Circle "A circle." [radius])
-  (Square [side]))
-
-(defmethod Person :greet "Greets the person." [^Person this]
-  (str "Hi " (.-name this)))
-````
-
-Docs are stored as `:doc` metadata on the defined var or type var. Method docs
-are stored on the runtime method entry; constructor docs are stored on the
-constructor entry; namespace docs live on the namespace. Both `doc` and `meta`
-accept a bare symbol (or a quoted one):
-
-```clojure
-(doc add)     ; renders the Markdown docstring
-(meta add)    ; {:doc "Adds **two** numbers. ..." ...}
-(doc Person.greet)
-(doc demo.app)
-(doc defn)    ; built-in form docs, including a usage example
 ```
 
-Inside docstrings, backticked names and Markdown links become references:
+Docs are stored as `:doc` metadata. Method, constructor, and namespace docs are
+stored on their runtime entries. `doc` and `meta` accept bare symbols:
+
+```clojure
+(doc add)
+(meta add)
+(doc Person.greet)
+(doc demo.app)
+(doc defn)    ; built-in form docs with usage examples
+```
+
+Backticked names and Markdown links become references:
 
 ```clojure
 (defn multiply
@@ -323,52 +305,10 @@ Inside docstrings, backticked names and Markdown links become references:
   (* a b))
 ```
 
-References are resolved against vars, types, methods, namespaces, and built-in
-forms; `doc` prints them under `See also`. Elixir-style arity suffixes such as
-`` `add/2` `` resolve to `add`.
+`doc` renders Markdown in the REPL and prints resolved references under
+`See also`.
 
-## Namespaces
-
-`ns` follows Clojure CLR conventions for imports and requires:
-
-```clojure
-(ns demo.lib)
-(def answer 42)
-
-(ns demo.app
-  (:import [System.Text StringBuilder])
-  (:require [demo.lib :as lib :refer [answer]]))
-
-(def sb (StringBuilder. "wisp"))
-(lib/answer)        ; qualified
-answer              ; referred
-
-(ns demo.uses (:use demo.lib))
-(ns demo.only (:use [demo.lib :only [answer]]))
-```
-
-Imports are namespace-scoped: an alias imported in `demo.app` does not resolve
-from another namespace. Required aliases resolve in qualified symbols and
-auto-resolved keywords (`::thing`). `:refer` and `:use` add var referrals;
-`:use` skips `^:private` vars. `(in-ns 'demo.other)` switches the session
-namespace.
-
-Interface parameters can declare CLR byref modifiers:
-
-```clojure
-(definterface IRefs
-  (^int Bump [this ^int& value])
-  (^bool TryGet [this ^:out ^int& value])
-  (^int Peek [this ^:readonly ^int& value]))
-```
-
-`^Int32&` is byref type notation; `^:out` and `^:readonly` add CLR `Out`/`In`
-parameter metadata (plain `&` is a writable ref). The `&:out` / `&:readonly`
-suffix forms are accepted as well. A method with writable byref parameters
-returns a vector `[result out1 ref1 ...]`; the stub writes the tail values back
-and returns the head.
-
-## Pattern matching, unions, and active patterns
+## 10. Pattern matching
 
 ```clojure
 (defunion Shape
@@ -386,9 +326,8 @@ and returns the head.
 ```
 
 Patterns include literals, bindings, `_`, vectors with `&`/`:as`, maps with
-`:keys`/`:or`/`:as`, type tests (`^Circle c`), union cases (`(Circle r)`), active
-patterns, and `(or ...)`. Clauses are `(pattern body...)` with an optional
-`:when` guard:
+`:keys`/`:or`/`:as`, type tests (`^Circle c`), union cases, active patterns, and
+`(or ...)`. Clauses are `(pattern body...)` with an optional `:when` guard.
 
 ```clojure
 (defactive even? [n]
@@ -399,17 +338,92 @@ patterns, and `(or ...)`. Clauses are `(pattern body...)` with an optional
   (_ -1))
 ```
 
-`defunion` emits a marker interface plus one class per case; cases use normal
-map/positional constructors and can carry typed fields. Active pattern
-functions return nil for no match or a value for a successful bind.
+`match` checks exhaustiveness for finite domains:
 
-`match` checks exhaustiveness for finite domains. A union match must cover every
-case, and a boolean match must cover `true` and `false`, unless a `_`, binding,
-`(or ...)`, or typed catch-all covers the rest. Guards do not count as coverage.
+- every union case must be covered;
+- booleans must cover `true` and `false`;
+- `_`, bindings, `(or ...)`, typed booleans, whole-union hints, and typed union
+  cases count as coverage;
+- guarded clauses do not count.
+
 Missing cases report `WISP3044` with the missing names. See
 [About exhaustive pattern matching](docs/explanation/exhaustive-matching.md).
 
-## Delegates and events
+## 11. Types, records, and interfaces
+
+```clojure
+(definterface IShape
+  (^double Area [this]))
+
+(defclass Circle [^double radius]
+  (implements IShape))
+
+(defstruct Point [^double x ^double y])
+
+(defmethod IShape.Area [^Circle this]
+  (* System.Math/PI (.-radius this) (.-radius this)))
+
+(defmethod Circle.Diameter [^Circle this]
+  (* 2.0 (.-radius this)))
+
+; Receiver hint infers the owning class.
+(defmethod Circumference [^Circle this]
+  (* 2.0 System.Math/PI (.-radius this)))
+```
+
+- `Circle.Area` applies to the class; `IShape.Area` applies to the interface and
+  uses the `^Circle` receiver hint to join the implementation to `Circle`.
+- Methods are public by default; `^:private` rejects calls from other namespaces.
+- Interface members with a receiver first parameter exclude it from the emitted
+  CLR signature.
+- `defstruct` emits a real CLR value type with value equality, printing, methods,
+  and interface dispatch; it cannot inherit.
+
+Constructors use the class/struct name:
+
+```clojure
+(defclass Pair [a b])
+
+(def p (Pair {:a 1 :b 2}))     ; default field-map constructor
+
+(defmethod Pair [a b] {:a a :b b})
+(defmethod Pair [a] {:a a :b (* a 2)})
+
+(Pair 3 4)
+(Pair 5)
+```
+
+Fields and generics use C#-shaped hints:
+
+```clojure
+(defclass [Box T (where [IComparable T])]
+  [^T value])
+
+(def b (new [Box Int] 42))
+
+(defclass [Assoc K V (where [IComparable K])]
+  [^[Dictionary [K V]] data])
+```
+
+`(inherits Base)` supports a custom `WispRecordBase` subtype exposing a
+`(string, string[], obj[])` constructor. `deftype` is a deprecated alias for
+`defclass`; explicit `(defmethod Type :name ...)` targets, keyword-headed hints,
+and `->Type` constructors remain supported.
+
+### Byref interface parameters
+
+```clojure
+(definterface IRefs
+  (^int Bump [this ^int& value])
+  (^bool TryGet [this ^:out ^int& value])
+  (^int Peek [this ^:readonly ^int& value]))
+```
+
+`^Int32&` is byref notation; `^:out` and `^:readonly` add CLR `Out`/`In`
+metadata. Writable byref methods return `[result out1 ref1 ...]`; the stub writes
+the tail values back and returns the head.
+
+## 12. Delegates and events
 
 ```clojure
 (defdelegate ^int IntUnary [^int x])
@@ -423,9 +437,8 @@ Missing cases report `WISP3044` with the missing names. See
 (set! twice nil) ; disassociate
 ```
 
-Wisp functions automatically adapt to CLR delegate parameters, including record
-fields and event handlers. CLR events are wired through their `add_`/`remove_`
-accessors:
+Wisp functions adapt automatically to CLR delegate parameters, record fields,
+and event handlers. CLR events use their `add_`/`remove_` accessors:
 
 ```clojure
 (.add_Ping source handler)
@@ -433,11 +446,7 @@ accessors:
 (.remove_Ping source handler)
 ```
 
-`defdelegate` emits a real CLR delegate type; `delegate` wraps an `IFn`, and
-delegates are callable directly from Wisp.
-
-Delegate signatures may use Wisp-defined types, byref parameters, and pointer
-parameters:
+Delegate signatures support Wisp-defined types, byref parameters, and pointers:
 
 ```clojure
 (defstruct Point [^int x])
@@ -447,14 +456,10 @@ parameters:
 (defdelegate ^int ReadInt [^Int32* p])
 ```
 
-Writable byref delegate parameters use the same `[result out1 ref1 ...]`
-writeback convention as interface methods; pointer parameters are exposed to
-Wisp as `IntPtr`.
+Writable byref parameters use the `[result out1 ref1 ...]` convention; pointer
+parameters are exposed as `IntPtr`.
 
-## Async and await
-
-`async` runs a body as a `Task<obj>` computation; `await` suspends until a task
-or value task completes:
+## 13. Async and await
 
 ```clojure
 (defn work [n]
@@ -475,7 +480,7 @@ or value task completes:
 ```
 
 Async bodies return `Task<obj>` by default. A return-type hint selects a value
-task instead:
+task:
 
 ```clojure
 (def vt (^ValueTask async (await (System.Threading.Tasks.Task/Delay 1)) 42))
@@ -485,15 +490,14 @@ task instead:
 (await typed) ; 42
 ```
 
-`await` accepts both generic and non-generic `ValueTask` values.
+`await` accepts generic and non-generic `Task` and `ValueTask`.
 
 On .NET 11 the Reflection.Emit backend emits runtime-async methods
 (`MethodImplAttributes.Async` plus `AsyncHelpers.Await`). On .NET 10, and for
-the interpreter, async bodies are transformed into Task continuation chains.
-`Session(forceCompilerAsync = true)` selects the compiler transform explicitly;
-this is useful for exercising the .NET 10 path on a newer runtime.
+the interpreter, async bodies compile to Task continuation chains.
+`Session(forceCompilerAsync = true)` selects the compiler transform.
 
-## Native CLR interop
+## 14. CLR interop
 
 ```clojure
 (System.Math/Abs -5)
@@ -509,7 +513,7 @@ this is useful for exercising the .NET 10 path on a newer runtime.
 (.-Count numbers)
 ```
 
-Type hints use C#-shaped symbol types. Generic arguments may be flat or grouped:
+Type hints use C#-shaped symbols; generic arguments may be flat or grouped:
 
 ```clojure
 ^int
@@ -520,46 +524,61 @@ Type hints use C#-shaped symbol types. Generic arguments may be flat or grouped:
 ^[byref int]
 ```
 
-`TypeHints.resolve` constructs reified generic CLR types with
-`MakeGenericType`, arrays, pointers, and byrefs. Keyword-headed hints are still
-accepted for compatibility but deprecated.
+`TypeHints.resolve` constructs reified generics with `MakeGenericType`, arrays,
+pointers, and byrefs. Keyword-headed hints are accepted but deprecated.
 
-## Architecture
+## 15. Packages and build integration
 
-- **Wisp.Core** — persistent list/vector/map/set, lazy sequences, `IFn`/`AFn`,
-  keywords, symbols, metadata, namespaces/vars, diagnostics, printing, Hiccup
-  type hints.
-- **Wisp.Reader** — Clojure-shaped data reader. Every metadata-capable form gets
-  `:wisp/start`, `:wisp/end`, `:wisp/line`, and `:wisp/column` metadata.
-- **Wisp.Syntax** — lossless green/red syntax tree with trivia and a
-  rust-analyzer-style incremental top-level reparse. The reparser reuses green
-  nodes and agrees with full reparses across randomized edits.
-- **Wisp.Compiler** — reader forms → macro expansion → core IR → optimized core
-  IR → interpreter or Reflection.Emit execution. `Session` owns one persistent
-  collectible dynamic assembly and adds an evaluator type per form.
-- **Wisp.Cli** — file runner, `--eval`, and multiline REPL.
+- **Wisp.Cli** — dotnet tool, command name `wisp`.
+- **Wisp.Sdk** — MSBuild SDK with `WispBuild`, `WispRun`, and `Wisp` targets.
+- **GitHub releases** — `bootstrap-*` tags attach both `.nupkg` files.
+- **GitHub Packages** — both packages publish to the repository's NuGet feed.
 
-## Compiler layers
+Use the SDK from a `.wisp.proj`:
 
-1. Surface forms: reader data, including metadata and source ranges.
-2. Macro expansion: `defmacro` vars are invoked on raw forms, with expansion
-   traces attached to diagnostics.
+```xml
+<Project Sdk="Wisp.Sdk">
+  <PropertyGroup>
+    <Name>demo.app</Name>
+    <RootNamespace>demo.app</RootNamespace>
+    <StartupObject>demo.app/main</StartupObject>
+  </PropertyGroup>
+</Project>
+```
+
+```bash
+dotnet msbuild app.wisp.proj -t:WispRun -p:WispTool=wisp
+```
+
+See [How to use the MSBuild SDK](docs/how-to-guides/use-the-msbuild-sdk.md).
+
+## 16. Architecture
+
+- **Wisp.Core** — persistent collections, lazy sequences, `IFn`/`AFn`, keywords,
+  symbols, metadata, namespaces/vars, diagnostics, printing, type hints.
+- **Wisp.Reader** — Clojure-shaped reader with source metadata on every
+  metadata-capable form.
+- **Wisp.Syntax** — lossless green/red syntax tree with trivia and incremental
+  top-level reparse.
+- **Wisp.Compiler** — reader forms → macro expansion → Core IR → validation →
+  optimization → interpreter or Reflection.Emit.
+- **Wisp.Cli** — file runner, project runner, template scaffolding, TUI/line
+  REPL, and hot reload.
+
+Compiler layers:
+
+1. Surface forms with metadata and source ranges.
+2. Macro expansion with expansion traces.
 3. Core IR: `Const`, `Local`, `VarRef`, `If`, `Do`, `Let`, `Lambda`, `Call`,
-   `Def`, `Quote`, `SetNamespace`, CLR call/property/construct nodes,
-   `DefineType`, `DefineMethod`, `Loop`, `Recur`, `Try`, and `Throw`.
-4. Validation: `recur` must be in tail position and must match its enclosing
-   loop or function arity.
-5. Optimized Core IR: constant conditional folding, `do` flattening, and
-   identity-let elimination.
-6. Execution: interpreter or emitted IL in a collectible dynamic assembly.
-   Emitted methods handle control flow, bindings, defs, calls, interop,
-   record/method registration, loop/recur, try/catch/finally, and lambda bodies.
-   Each lambda becomes a generated `AFn` subclass with its own IL `Invoke`
-   method and captured environment; no interpreter closure is created on the
-   Reflection.Emit path. Async bodies use runtime async on .NET 11 and a Task
+   `Def`, `Quote`, namespace ops, CLR call/property/construct nodes, type and
+   method definitions, `Async`, `Await`, `Loop`, `Recur`, `Try`, and `Throw`.
+4. `recur` tail-position and arity validation.
+5. Constant folding, `do` flattening, and identity-let elimination.
+6. Interpreter or emitted IL in a collectible dynamic assembly. Lambdas become
+   generated `AFn` subclasses; async bodies use runtime async on .NET 11 and a
    continuation transform on .NET 10.
 
-## Samples
+## 17. Samples
 
 - `samples/hello.wisp` — functions, recursion, printing
 - `samples/interop.wisp` — static/instance CLR calls and generic construction
@@ -574,31 +593,47 @@ accepted for compatibility but deprecated.
 - `samples/async.wisp` — async/await, tasks, and value tasks
 - `samples/projects/app` — multi-project application with a library reference
 
-## Current limits
+Run any single-file sample:
 
-- `definterface` does not yet accept a generic header or default members.
-- Delegate return-byref signatures are not supported. `set!` supports vars
-  only, not mutable locals or record fields.
-- Wisp-defined events are not emitted yet; CLR events work through their
-  add/remove accessors.
-- The .NET 10 async transform does not support `await` inside `loop`/`recur`
-  or `finally`; the .NET 11 runtime-async path does.
-- Byref writeback uses the vector convention above; return-byref signatures are
-  not supported.
-- Byref `&` hints currently apply to interface parameters; `defn` ABI signatures
-  and call-site `(ref ...)` / `(out ...)` / `(in ...)` forms are not implemented.
+```bash
+wisp samples/records.wisp
+```
+
+## 18. Current limits
+
+- `definterface` does not accept a generic header or default members yet.
+- Delegate return-byref signatures are not supported. `set!` supports vars only,
+  not mutable locals or record fields.
+- Wisp-defined events are not emitted yet; CLR events use add/remove accessors.
+- The .NET 10 async transform does not support `await` inside `loop`/`recur` or
+  `finally`; the .NET 11 runtime-async path does.
+- Byref writeback uses the vector convention above; return-byref signatures and
+  call-site `(ref ...)` / `(out ...)` / `(in ...)` forms are not implemented.
 - `:refer` supports name vectors or `:all`; arbitrary `:rename`/`:exclude`
   options are not implemented.
-- Constructor overload selection is by arity plus parameter type hints; C#
-  exact overload ranking and implicit numeric ranking are not implemented.
-- `defunion` cases cannot declare type parameters yet.
-- `or` patterns cannot bind names, and active patterns bind one function result
-  per call.
+- Constructor overload selection uses arity plus type hints; C# exact overload
+  ranking and implicit numeric ranking are not implemented.
+- `defunion` cases cannot declare type parameters.
+- `or` patterns cannot bind names, and active patterns bind one result per call.
 - Typed record fields support primitives, arrays, dictionaries, and common
-  generic collections; arbitrary CLR collection types still fall back to
-  exact/assignable conversion.
-- Codegen emits lambda bodies as IL; common runtime services such as var lookup,
-  collection construction, and interop dispatch are centralized helper calls.
-- Maps and sets wrap BCL immutable HAMTs; the vector is a custom 32-way trie.
+  generic collections; other CLR collection types fall back to exact/assignable
+  conversion.
+- Project libraries are loaded from source. The compiler does not emit reusable
+  `.dll` files yet, and Wisp source libraries are not consumed through
+  `PackageReference`.
 - The compiler consumes reader values with source metadata rather than lowering
-  directly from the syntax tree yet.
+  directly from the syntax tree.
+- The TUI captures Wisp session output; direct `Console` writes from CLR interop
+  can paint over the screen.
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Build a multi-project application](docs/tutorials/build-a-multi-project-app.md)
+- [Create a project from a template](docs/how-to-guides/create-a-project-from-a-template.md)
+- [Reference another project](docs/how-to-guides/reference-a-wisp-project.md)
+- [Use the MSBuild SDK](docs/how-to-guides/use-the-msbuild-sdk.md)
+- [CLI and REPL reference](docs/reference/cli.md)
+- [Project file reference](docs/reference/project-file.md)
+- [About double-pass project loading](docs/explanation/double-pass-projects.md)
+- [About exhaustive pattern matching](docs/explanation/exhaustive-matching.md)
