@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Wisp.Reader</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Reader.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Wisp.Core/Wisp.Core.fsproj" />
+  </ItemGroup>
+</Project>

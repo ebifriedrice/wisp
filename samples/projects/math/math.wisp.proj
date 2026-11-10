@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <Name>demo.math</Name>
+    <RootNamespace>demo.math</RootNamespace>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Wisp Include="src/**/*.wisp" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Wisp.Compiler</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Ast.fs" />
+    <Compile Include="Numeric.fs" />
+    <Compile Include="Interop.fs" />
+    <Compile Include="AsyncRuntime.fs" />
+    <Compile Include="AsyncTransform.fs" />
+    <Compile Include="Records.fs" />
+    <Compile Include="Desugar.fs" />
+    <Compile Include="Optimize.fs" />
+    <Compile Include="Validate.fs" />
+    <Compile Include="Runtime.fs" />
+    <Compile Include="Markdown.fs" />
+    <Compile Include="Builtins.fs" />
+    <Compile Include="Eval.fs" />
+    <Compile Include="Codegen.fs" />
+    <Compile Include="MacroExpander.fs" />
+    <Compile Include="Session.fs" />
+    <Compile Include="Project.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Wisp.Core/Wisp.Core.fsproj" />
+    <ProjectReference Include="../Wisp.Reader/Wisp.Reader.fsproj" />
+  </ItemGroup>
+</Project>

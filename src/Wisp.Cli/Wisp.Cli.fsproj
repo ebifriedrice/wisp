@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Wisp.Cli</RootNamespace>
+    <AssemblyName>wisp</AssemblyName>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>wisp</ToolCommandName>
+    <PackageId>Wisp.Cli</PackageId>
+    <Version>0.1.0-bootstrap</Version>
+    <Authors>ebifriedrice</Authors>
+    <Description>Wisp language CLI and project runner.</Description>
+    <PackageTags>wisp;lisp;dotnet;clojure</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Wisp.Core/Wisp.Core.fsproj" />
+    <ProjectReference Include="../Wisp.Reader/Wisp.Reader.fsproj" />
+    <ProjectReference Include="../Wisp.Compiler/Wisp.Compiler.fsproj" />
+  </ItemGroup>
+</Project>

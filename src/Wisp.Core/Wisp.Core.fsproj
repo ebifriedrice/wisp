@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Wisp.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Diagnostics.fs" />
+    <Compile Include="Protocols.fs" />
+    <Compile Include="Values.fs" />
+    <Compile Include="Collections.fs" />
+    <Compile Include="Functions.fs" />
+    <Compile Include="Names.fs" />
+    <Compile Include="Namespaces.fs" />
+    <Compile Include="Print.fs" />
+    <Compile Include="Records.fs" />
+    <Compile Include="TypeHints.fs" />
+  </ItemGroup>
+</Project>

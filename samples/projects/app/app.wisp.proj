@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <Name>demo.app</Name>
+    <RootNamespace>demo.app</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <StartupObject>demo.app/main</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Wisp Include="src/**/*.wisp" />
+    <ProjectReference Include="../math/math.wisp.proj" />
+  </ItemGroup>
+</Project>

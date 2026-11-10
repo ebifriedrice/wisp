@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Wisp.Syntax</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SyntaxKind.fs" />
+    <Compile Include="Lexer.fs" />
+    <Compile Include="Parser.fs" />
+    <Compile Include="SyntaxTree.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Wisp.Core/Wisp.Core.fsproj" />
+  </ItemGroup>
+</Project>
