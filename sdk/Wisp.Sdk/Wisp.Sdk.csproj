@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <PackageId>Wisp.Sdk</PackageId>
-    <Version>0.1.1-bootstrap</Version>
+    <Version>0.1.2-bootstrap</Version>
     <Authors>ebifriedrice</Authors>
     <Description>MSBuild SDK for Wisp projects.</Description>
     <PackageType>MSBuildSdk</PackageType>

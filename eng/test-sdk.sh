@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-0.1.1-bootstrap}"
+version="${1:-0.1.2-bootstrap}"
 tool="${WISP_TOOL:-$root/artifacts/tools/wisp}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
