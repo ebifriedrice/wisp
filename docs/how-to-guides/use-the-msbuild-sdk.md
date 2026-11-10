@@ -13,7 +13,7 @@ Build the packages from the repository:
 $ dotnet pack src/Wisp.Cli/Wisp.Cli.fsproj -c Release -o artifacts/nuget
 $ dotnet pack sdk/Wisp.Sdk/Wisp.Sdk.csproj -c Release -o artifacts/nuget
 $ dotnet tool install --tool-path artifacts/tools \
-    --add-source artifacts/nuget Wisp.Cli --version 0.1.5-bootstrap
+    --add-source artifacts/nuget Wisp.Cli --version 0.1.6-bootstrap
 ```
 
 ## Pin the SDK version
@@ -23,7 +23,7 @@ Create a `global.json` next to your project:
 ```json
 {
   "msbuild-sdks": {
-    "Wisp.Sdk": "0.1.5-bootstrap"
+    "Wisp.Sdk": "0.1.6-bootstrap"
   }
 }
 ```

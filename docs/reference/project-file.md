@@ -146,8 +146,8 @@ Package: `Wisp.Sdk`.
 | `WispRun` | Depends on `WispBuild`; runs `wisp run`. |
 | `Wisp` | Depends on `WispRun`. |
 
-The SDK package is `Wisp.Sdk` version `0.1.5-bootstrap`. The CLI tool package is
-`Wisp.Cli` version `0.1.5-bootstrap` with command name `wisp`.
+The SDK package is `Wisp.Sdk` version `0.1.6-bootstrap`. The CLI tool package is
+`Wisp.Cli` version `0.1.6-bootstrap` with command name `wisp`.
 
 ## Current package limits
 
