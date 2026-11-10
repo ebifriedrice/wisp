@@ -1,8 +1,8 @@
-# About double-pass project loading
+# About double-pass evaluation
 
-Wisp's single-file session evaluates forms in order. A project build adds two
-declaration-oriented passes so functions and types can be referenced before
-their definition text.
+Every Wisp batch uses declaration-oriented passes: a source file, a REPL
+submission, or the combined project graph. Functions and types can be referenced
+before their definition text in the same batch.
 
 ## Why declarations exist in Clojure
 
@@ -11,9 +11,8 @@ may mention a var that does not exist yet, but calling it before the defining
 form runs fails. Clojure therefore provides `(declare name)` for forward
 references.
 
-Wisp keeps that model for single-file evaluation and the REPL. A project has
-enough information to do better: all source files are known before evaluation
-starts.
+Wisp applies declaration passes whenever it has a batch of forms. A project has
+all files up front; a file or REPL submission has all submitted forms up front.
 
 ## The four project phases
 
@@ -33,6 +32,13 @@ its first attempt and is retried after other declarations have run. This is why
 A cycle with no resolvable order eventually stops making progress and reports
 the remaining diagnostics.
 
+### Project graph ordering
+
+Project loading adds dependency ordering on top of the same passes. Referenced
+projects load first, and files are arranged by `:require`/`:use` namespaces.
+The declaration passes themselves are identical to a single-file or REPL
+batch.
+
 ### 3. Macros and functions
 
 Macros are evaluated before functions so later forms can expand them. Function
@@ -48,7 +54,7 @@ startup function.
 
 ## What double-pass does not change
 
-Project loading does not make eager initialization order irrelevant:
+Declaration passes do not make eager initialization order irrelevant:
 
 - A top-level expression that calls a function before that function's `def`
   value has run still sees the value that exists at that moment.

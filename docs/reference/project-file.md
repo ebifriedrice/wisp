@@ -80,7 +80,10 @@ matches one character, and `**` matches zero or more segments. The default is
 Paths are relative to the project file. Referenced projects load first, and all
 projects share one namespace registry. Project cycles are reported as errors.
 
-## Loading order
+## Evaluation order
+
+The same declaration passes run for every batch: a source file, a REPL
+submission, or a project graph.
 
 1. Project references are loaded depth-first, dependencies first.
 2. Namespaces are ordered by `:require` and `:use` clauses.
@@ -90,7 +93,7 @@ projects share one namespace registry. Project cycles are reported as errors.
 6. Values, methods, and remaining top-level forms run.
 
 No `declare` form is required for functions or types. See
-[About double-pass project loading](../explanation/double-pass-projects.md).
+[About double-pass evaluation](../explanation/double-pass-projects.md).
 
 ## CLI commands
 
@@ -146,8 +149,8 @@ Package: `Wisp.Sdk`.
 | `WispRun` | Depends on `WispBuild`; runs `wisp run`. |
 | `Wisp` | Depends on `WispRun`. |
 
-The SDK package is `Wisp.Sdk` version `0.1.1-bootstrap`. The CLI tool package is
-`Wisp.Cli` version `0.1.1-bootstrap` with command name `wisp`.
+The SDK package is `Wisp.Sdk` version `0.1.2-bootstrap`. The CLI tool package is
+`Wisp.Cli` version `0.1.2-bootstrap` with command name `wisp`.
 
 ## Current package limits
 

@@ -25,7 +25,7 @@ to GitHub Packages:
 ```bash
 dotnet tool install --global Wisp.Cli \
   --add-source https://nuget.pkg.github.com/ebifriedrice/index.json \
-  --version 0.1.1-bootstrap
+  --version 0.1.2-bootstrap
 wisp --version
 ```
 
@@ -263,10 +263,11 @@ Imports and aliases are namespace-scoped. `:refer` and `:use` add referrals;
 `:use` skips `^:private` vars. `(in-ns 'demo.other)` switches the session
 namespace.
 
-Project loading uses declaration-oriented passes over all source files:
-namespaces first, then types (with retries for forward type references), then
-macros and functions, then values and methods. No `declare` form is needed for
-forward references across files or projects.
+Evaluation uses declaration-oriented passes for every batch: a source file, a
+REPL submission, or the combined project graph. Namespaces run first, then types
+(with retries for forward type references), then macros and functions, then
+values and methods. No `declare` form is needed for forward references, whether
+the definitions are in one file, a REPL submission, or across projects.
 
 ## 9. Documentation in the language
 
@@ -574,7 +575,9 @@ Compiler layers:
    method definitions, `Async`, `Await`, `Loop`, `Recur`, `Try`, and `Throw`.
 4. `recur` tail-position and arity validation.
 5. Constant folding, `do` flattening, and identity-let elimination.
-6. Interpreter or emitted IL in a collectible dynamic assembly. Lambdas become
+6. Declaration passes for every batch: namespaces, types with forward-reference
+   retries, macros/functions, then values and methods.
+7. Interpreter or emitted IL in a collectible dynamic assembly. Lambdas become
    generated `AFn` subclasses; async bodies use runtime async on .NET 11 and a
    continuation transform on .NET 10.
 
@@ -635,5 +638,5 @@ wisp samples/records.wisp
 - [Use the MSBuild SDK](docs/how-to-guides/use-the-msbuild-sdk.md)
 - [CLI and REPL reference](docs/reference/cli.md)
 - [Project file reference](docs/reference/project-file.md)
-- [About double-pass project loading](docs/explanation/double-pass-projects.md)
+- [About double-pass evaluation](docs/explanation/double-pass-projects.md)
 - [About exhaustive pattern matching](docs/explanation/exhaustive-matching.md)
