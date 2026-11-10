@@ -70,6 +70,7 @@ module Optimize =
         | CreateDelegate(delegateType, callback) ->
             rebuild (CreateDelegate(delegateType, optimize callback))
         | SetVar(symbol, value) -> rebuild (SetVar(symbol, optimize value))
+        | Declare _ -> expression
         | Async(returnKind, body) -> rebuild (Async(returnKind, optimize body))
         | Await value -> rebuild (Await(optimize value))
         | DefineMethod(typeName, methodName, value, isPrivate, namespaceName) ->

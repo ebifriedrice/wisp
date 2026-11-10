@@ -9,65 +9,6 @@ type EvalOutput =
     { Values: obj list
       Diagnostics: Diagnostic list }
 
-type private DefinitionKind =
-    | NamespaceDefinition
-    | TypeDefinition
-    | MacroDefinition
-    | FunctionDefinition
-    | ValueDefinition
-    | OtherDefinition
-
-module private DefinitionForm =
-    let asList (form: obj) =
-        match form with
-        | :? PersistentList as list -> list.Items |> Seq.toList
-        | :? ISeq as sequence -> Seqs.toList (sequence :> obj)
-        | _ -> []
-
-    let symbolName (form: obj) =
-        match form with
-        | :? Symbol as symbol -> Some(Clr.symbolTypeName symbol)
-        | :? string as text -> Some text
-        | :? Keyword as keyword ->
-            Some(
-                match keyword.Namespace with
-                | Some namespaceName -> namespaceName + "." + keyword.Name
-                | None -> keyword.Name
-            )
-        | _ -> None
-
-    let kind (form: obj) =
-        match asList form with
-        | head :: _ ->
-            match symbolName head with
-            | Some "ns" -> NamespaceDefinition
-            | Some "defclass"
-            | Some "deftype"
-            | Some "defstruct"
-            | Some "definterface"
-            | Some "defdelegate"
-            | Some "defunion" -> TypeDefinition
-            | Some "defmacro" -> MacroDefinition
-            | Some "defn"
-            | Some "defactive" -> FunctionDefinition
-            | Some "def" -> ValueDefinition
-            | _ -> OtherDefinition
-        | [] -> OtherDefinition
-
-    let tryNamespaceName (form: obj) =
-        match asList form with
-        | head :: name :: _ when symbolName head = Some "ns" -> symbolName name
-        | _ -> None
-
-    let isNamespaceChange (form: obj) =
-        match asList form with
-        | head :: _ ->
-            match symbolName head with
-            | Some "ns"
-            | Some "in-ns" -> true
-            | _ -> false
-        | [] -> false
-
 type Session
     (?registry: NamespaceRegistry, ?output: TextWriter, ?backend: ExecutionBackend, ?renderMarkdown: bool, ?forceCompilerAsync: bool)
     =
@@ -214,159 +155,14 @@ type Session
                     |> withExpansionNotes
                 )
 
-    member this.EvalEntriesDetailed(entries: (string * obj) list) : EvalOutput * (int * Diagnostic) list =
-        let entryArray = entries |> List.toArray
-        let count = entryArray.Length
-        let expandedForms = entryArray |> Array.map snd
-        let rawKinds = entryArray |> Array.map (fun (_, form) -> DefinitionForm.kind form)
-        let values : obj option[] = Array.zeroCreate count
-        let processed : bool[] = Array.zeroCreate count
-        let failed : bool[] = Array.zeroCreate count
-        let diagnostics = ResizeArray<int * Diagnostic>()
-        let batchExpansions = ResizeArray<MacroExpansion>()
-        let expansionsByIndex : MacroExpansion list[] = Array.create count []
-        lastExpansions <- []
-
-        let attachExpansionNotes index (errors: Diagnostic list) =
-            match expansionsByIndex.[index] with
-            | [] -> errors
-            | expansions ->
-                let notes =
-                    expansions
-                    |> List.map (fun expansion ->
-                        sprintf
-                            "macro %s: %s => %s"
-                            expansion.MacroName
-                            (Print.printString expansion.Invocation)
-                            (Print.printString expansion.Result))
-                errors
-                |> List.map (fun diagnostic ->
-                    { diagnostic with Notes = diagnostic.Notes @ notes })
-
-        let evaluateRaw index =
-            let namespaceName, form = entryArray.[index]
-            runtime.CurrentNamespace <- namespaceName
-            runtime.Registry.GetOrCreate namespaceName |> ignore
-            this.EvalOne form
-
-        let evaluate index =
-            let namespaceName, _ = entryArray.[index]
-            runtime.CurrentNamespace <- namespaceName
-            runtime.Registry.GetOrCreate namespaceName |> ignore
-            this.EvalOne expandedForms.[index]
-
-        let record index result =
-            match result with
-            | Ok value -> values.[index] <- Some value
-            | Error errors ->
-                errors
-                |> attachExpansionNotes index
-                |> List.iter (fun diagnostic -> diagnostics.Add(index, diagnostic))
-
-        for index in 0 .. count - 1 do
-            if rawKinds.[index] = NamespaceDefinition then
-                evaluateRaw index |> record index
-                processed.[index] <- true
-
-        for index in 0 .. count - 1 do
-            if rawKinds.[index] = MacroDefinition then
-                evaluateRaw index |> record index
-                processed.[index] <- true
-
-        // Expand macros before classifying and resolving expanded forms. A
-        // macro may produce a defmacro, so evaluate generated macro definitions
-        // as they are encountered.
-        for index in 0 .. count - 1 do
-            if not failed.[index] && not processed.[index] then
-                let namespaceName, _ = entryArray.[index]
-                runtime.CurrentNamespace <- namespaceName
-                runtime.Registry.GetOrCreate namespaceName |> ignore
-                match MacroExpander.expand runtime namespaceName expandedForms.[index] with
-                | Error errors ->
-                    failed.[index] <- true
-                    errors |> List.iter (fun error -> diagnostics.Add(index, toDiagnostic error))
-                | Ok expansion ->
-                    batchExpansions.AddRange expansion.Expansions
-                    expansionsByIndex.[index] <- expansion.Expansions
-                    expandedForms.[index] <- expansion.Form
-                    if DefinitionForm.kind expansion.Form = MacroDefinition then
-                        evaluate index |> record index
-                        processed.[index] <- true
-
-        let kinds = expandedForms |> Array.map DefinitionForm.kind
-
-        let pendingTypes =
-            ResizeArray<int>(
-                [ for index in 0 .. count - 1 do
-                      if not failed.[index] && not processed.[index] && kinds.[index] = TypeDefinition then
-                          yield index ]
-            )
-        let lastTypeErrors = Collections.Generic.Dictionary<int, Diagnostic list>()
-        let mutable progress = true
-        while progress && pendingTypes.Count > 0 do
-            progress <- false
-            let remaining = ResizeArray<int>()
-            for index in pendingTypes do
-                match evaluate index with
-                | Ok value ->
-                    values.[index] <- Some value
-                    progress <- true
-                | Error errors ->
-                    lastTypeErrors.[index] <- errors
-                    remaining.Add index
-            pendingTypes.Clear()
-            pendingTypes.AddRange remaining
-        for index in pendingTypes do
-            match lastTypeErrors.TryGetValue index with
-            | true, errors ->
-                errors
-                |> attachExpansionNotes index
-                |> List.iter (fun diagnostic -> diagnostics.Add(index, diagnostic))
-            | false, _ -> ()
-
-        for kindToRun in [ MacroDefinition; FunctionDefinition ] do
-            for index in 0 .. count - 1 do
-                if
-                    not failed.[index]
-                    && not processed.[index]
-                    && kinds.[index] = kindToRun
-                then
-                    evaluate index |> record index
-                    processed.[index] <- true
-
-        for index in 0 .. count - 1 do
-            if not failed.[index] && not processed.[index] then
-                match kinds.[index] with
-                | ValueDefinition
-                | OtherDefinition -> evaluate index |> record index
-                | _ -> ()
-
-        lastExpansions <- List.ofSeq batchExpansions
-        let orderedDiagnostics =
-            diagnostics
-            |> Seq.sortBy fst
-            |> Seq.map snd
-            |> Seq.toList
-        { Values = values |> Array.choose id |> Array.toList
-          Diagnostics = orderedDiagnostics },
-        List.ofSeq diagnostics
-
     member this.EvalForm(form: obj) : Result<obj, Diagnostic list> =
-        let output, _ = this.EvalEntriesDetailed [ runtime.CurrentNamespace, form ]
-        match output.Diagnostics with
-        | [] ->
-            match List.tryLast output.Values with
-            | Some value -> Ok value
-            | None -> Ok null
-        | errors -> Error errors
+        this.EvalOne form
 
     member this.EvalText(source: SourceText) : EvalOutput =
-        let entries = ResizeArray<string * obj>()
+        let values = ResizeArray<obj>()
         let diagnostics = ResizeArray<Diagnostic>()
         let mutable offset = 0
         let mutable running = true
-        let mutable currentNamespace = runtime.CurrentNamespace
-
         while running && offset <= source.Length do
             let read = Reader.readFormsFrom source this.ReaderOptions offset
             if not read.Diagnostics.IsEmpty then
@@ -375,25 +171,19 @@ type Session
             elif read.Forms.IsEmpty then
                 running <- false
             else
+                let mutable failed = false
                 for form in read.Forms do
-                    entries.Add(currentNamespace, form)
-                    if DefinitionForm.isNamespaceChange form then
-                        let namespaceName, _ = entries.[entries.Count - 1]
-                        runtime.CurrentNamespace <- namespaceName
-                        runtime.Registry.GetOrCreate namespaceName |> ignore
+                    if not failed then
                         match this.EvalOne form with
-                        | Ok _ -> ()
-                        | Error _ -> ()
-                        currentNamespace <-
-                            DefinitionForm.tryNamespaceName form
-                            |> Option.defaultValue runtime.CurrentNamespace
-                offset <- read.Position
-
-        if diagnostics.Count > 0 then
-            { Values = []
-              Diagnostics = List.ofSeq diagnostics }
-        else
-            let output, _ = this.EvalEntriesDetailed(List.ofSeq entries)
-            output
+                        | Ok value -> values.Add value
+                        | Error errors ->
+                            diagnostics.AddRange errors
+                            failed <- true
+                if failed then
+                    running <- false
+                else
+                    offset <- read.Position
+        { Values = List.ofSeq values
+          Diagnostics = List.ofSeq diagnostics }
 
     member this.EvalText(text: string) = this.EvalText(SourceText.Create text)

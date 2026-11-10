@@ -207,6 +207,11 @@ type RuntimeOps private () =
         try DelegateOps.Create(delegateType, callback) :> obj
         with error -> raise (EvaluationException(error.Message, None))
 
+    static member Declare(runtime: RuntimeState, symbolId: int) : obj =
+        let symbol = runtime.GetConstant symbolId :?> Symbol
+        VarOps.declare runtime symbol |> ignore
+        null
+
     static member SetVar(runtime: RuntimeState, symbolId: int, value: obj) : obj =
         let symbol = runtime.GetConstant symbolId :?> Symbol
         let namespaceName =
@@ -317,6 +322,7 @@ module Codegen =
     let private defineDelegateMethod = runtimeOpsMethod "DefineDelegate"
     let private createDelegateMethod = runtimeOpsMethod "CreateDelegate"
     let private setVarMethod = runtimeOpsMethod "SetVar"
+    let private declareMethod = runtimeOpsMethod "Declare"
     let private defineMethodMethod = runtimeOpsMethod "DefineMethod"
     let private defineConstructorMethod = runtimeOpsMethod "DefineConstructor"
     let private recurMethod = runtimeOpsMethod "Recur"
@@ -552,6 +558,14 @@ module Codegen =
                 il.Emit(OpCodes.Ldc_I4, typeId)
                 emitIn isAsync il runtimeLocal environment callback
                 il.Emit(OpCodes.Call, createDelegateMethod)
+            | Declare symbols ->
+                for symbol in symbols do
+                    let symbolId = runtime.RegisterConstant symbol
+                    il.Emit(OpCodes.Ldloc, runtimeLocal)
+                    il.Emit(OpCodes.Ldc_I4, symbolId)
+                    il.Emit(OpCodes.Call, declareMethod)
+                    il.Emit OpCodes.Pop
+                il.Emit OpCodes.Ldnull
             | SetVar(symbol, value) ->
                 let symbolId = runtime.RegisterConstant symbol
                 let valueLocal = il.DeclareLocal(typeof<obj>)

@@ -32,6 +32,7 @@ module AsyncTransform =
         | Const _
         | Local _
         | VarRef _
+        | Declare _
         | Quote _
         | SetNamespace _
         | ImportType _
@@ -258,6 +259,7 @@ module AsyncTransform =
                 | Const _
                 | Local _
                 | VarRef _
+                | Declare _
                 | Quote _
                 | SetNamespace _
                 | ImportType _

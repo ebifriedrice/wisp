@@ -29,7 +29,7 @@ type ProjectTests() =
         projectPath
 
     [<Fact>]
-    member _.``projects load referenced libraries and forward references across files``() =
+    member _.``projects load referenced libraries and source-order types across files``() =
         let root = Path.Combine(Path.GetTempPath(), "wisp-project-" + Guid.NewGuid().ToString("N"))
         try
             let lib =
@@ -45,13 +45,14 @@ type ProjectTests() =
             File.WriteAllText(
                 app,
                 """(ns app (:require [lib :as lib]))
-(defclass Holder [^Later value])
 (defclass Later [^int n])
+(defclass Holder [^Later value])
+(declare helper)
 (defn main []
   (println "sum:" (lib/add 20 22))
   (println "forward:" (helper))
   (println "lib-forward:" (lib/later))
-  (println "type-forward:" (.-n (.-value (Holder {:value (Later {:n 7})})))))
+  (println "type:" (.-n (.-value (Holder {:value (Later {:n 7})})))))
 (defn helper [] "ok")
 """
             )
@@ -63,7 +64,7 @@ type ProjectTests() =
                 Assert.Contains("sum: 42", printed)
                 Assert.Contains("forward: ok", printed)
                 Assert.Contains("lib-forward: 99", printed)
-                Assert.Contains("type-forward: 7", printed)
+                Assert.Contains("type: 7", printed)
         finally
             if Directory.Exists root then
                 Directory.Delete(root, true)

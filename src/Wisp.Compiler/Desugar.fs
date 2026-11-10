@@ -2362,6 +2362,14 @@ module Desugar =
                                 )
                             )
             buildOr arguments
+        | "declare" ->
+            let symbols =
+                arguments
+                |> List.map asSymbol
+            match symbols |> List.tryPick (function None -> Some() | Some _ -> None) with
+            | Some () -> fail "WISP3045" "declare expects symbol names." form
+            | None ->
+                Ok(make form (Declare(symbols |> List.choose id)))
         | "async" ->
             let asyncReturnKind =
                 match asSymbol items.Head with
@@ -2491,7 +2499,7 @@ module Desugar =
                 match unqualifiedName symbol with
                 | Some name when
                     List.contains name
-                        [ "quote"; "if"; "do"; "def"; "defn"; "defactive"; "defmacro"; "deftype"; "defstruct"; "defclass"; "definterface"; "defdelegate"; "defunion"; "defmethod"; "delegate"; "set!"; "async"; "await"; "doc"; "meta"; "match"; "fn"; "fn*"; "let"; "let*"; "loop"; "recur"; "try"; "ns"; "new"; "when"; "cond"; "comment"; "throw"; "and"; "or" ] ->
+                        [ "quote"; "if"; "do"; "def"; "defn"; "defactive"; "defmacro"; "deftype"; "defstruct"; "defclass"; "definterface"; "defdelegate"; "defunion"; "defmethod"; "delegate"; "set!"; "declare"; "async"; "await"; "doc"; "meta"; "match"; "fn"; "fn*"; "let"; "let*"; "loop"; "recur"; "try"; "ns"; "new"; "when"; "cond"; "comment"; "throw"; "and"; "or" ] ->
                     desugarSpecial context form items name
                 | _ -> desugarCall context form items
             | None -> desugarCall context form items

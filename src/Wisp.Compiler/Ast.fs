@@ -136,6 +136,7 @@ and CoreNode =
     | DefineDelegate of DelegateDefinition
     | CreateDelegate of delegateType: Type * callback: CoreExpr
     | SetVar of Symbol * value: CoreExpr
+    | Declare of Symbol list
     | Async of returnKind: AsyncResultKind * body: CoreExpr
     | Await of value: CoreExpr
     | DefineMethod of typeName: string * methodName: string * value: CoreExpr * isPrivate: bool * namespaceName: string

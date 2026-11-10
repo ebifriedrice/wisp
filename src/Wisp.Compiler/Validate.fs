@@ -105,6 +105,7 @@ module Validate =
             | TypeTestHint(_, value) -> walk target false value
             | CreateDelegate(_, callback) -> walk None false callback
             | SetVar(_, value) -> walk None false value
+            | Declare _ -> Ok ()
             | Async(_, body) -> walk None false body
             | Await value -> walk target false value
             | DefineMethod(_, _, value, _, _) -> walk None false value

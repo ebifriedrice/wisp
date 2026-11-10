@@ -130,6 +130,20 @@ type RuntimeState(registry: NamespaceRegistry, output: TextWriter) =
 
     new() = RuntimeState(NamespaceRegistry(), Console.Out)
 
+module VarOps =
+    let declare (runtime: RuntimeState) (symbol: Symbol) =
+        let namespaceName =
+            match symbol.Namespace with
+            | Some namespaceName ->
+                runtime.Registry.ResolveAlias(runtime.CurrentNamespace, namespaceName)
+                |> Option.defaultValue namespaceName
+            | None -> runtime.CurrentNamespace
+        let namespaceValue = runtime.Registry.GetOrCreate namespaceName
+        match namespaceValue.FindVar symbol.Name with
+        | Some variable -> variable
+        | None ->
+            runtime.Registry.Intern(namespaceName, symbol.Name, null, symbol.Meta)
+
 module NamespaceResolution =
     let resolveTypeName (runtime: RuntimeState) (name: string) =
         match runtime.Registry.TryFind runtime.CurrentNamespace with

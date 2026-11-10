@@ -103,6 +103,15 @@ module Builtins =
 (def answer "The **ultimate** answer." 42)
 (doc answer)
 ```""");
+              ("declare",
+               """Declares vars without binding them. Useful for forward references and mutual recursion. Existing bindings are preserved.
+
+```clojure
+(declare even? odd?)
+
+(defn even? [n] (if (= n 0) true (odd? (- n 1))))
+(defn odd? [n] (if (= n 0) false (even? (- n 1))))
+```""");
               ("defn",
                """Defines a function. The optional docstring is Markdown and is stored as `:doc` metadata.
 

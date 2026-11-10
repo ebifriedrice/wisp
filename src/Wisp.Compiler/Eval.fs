@@ -281,6 +281,10 @@ module Eval =
         | Await value ->
             let awaited = evaluate value environment currentNamespace
             guarded (fun () -> AsyncOps.AwaitSync awaited)
+        | Declare symbols ->
+            for symbol in symbols do
+                VarOps.declare runtime symbol |> ignore
+            null
         | SetVar(symbol, value) ->
             let resolved = evaluate value environment currentNamespace
             let namespaceName =

@@ -51,11 +51,6 @@ module Project =
         | ValueForm
         | OtherForm
 
-    type private LoadedSource =
-        { Source: ProjectSource
-          Forms: obj list
-          NamespaceForm: obj option }
-
     let private elementName (name: string) = XName.Get name
 
     let private elements (document: XDocument) (name: string) =
@@ -369,63 +364,27 @@ module Project =
         session.Runtime.CurrentNamespace <- namespaceName
         session.Runtime.Registry.GetOrCreate namespaceName |> ignore
 
-    let private renderDiagnostics (source: ProjectSource) (diagnostics: Diagnostic list) =
-        let text = SourceText.Create(source.Text, source.Path)
-        diagnostics |> List.map (fun diagnostic -> text.Render diagnostic)
-
-    let private evaluateForm (session: Session) (source: ProjectSource) (form: obj) =
-        setNamespace session source.NamespaceName
-        session.EvalForm form
-        |> Result.mapError (renderDiagnostics source)
-
-    let private readLoadedSources (sources: ProjectSource list) =
+    let private evaluateSources (session: Session) (sources: ProjectSource list) =
         let diagnostics = ResizeArray<string>()
-        let loaded =
-            sources
-            |> List.choose (fun source ->
-                match readForms source source.NamespaceName with
-                | Error errors ->
-                    errors
-                    |> List.iter (fun diagnostic ->
-                        let text = SourceText.Create(source.Text, source.Path)
-                        diagnostics.Add(text.Render diagnostic))
-                    None
-                | Ok forms ->
-                    Some
-                        { Source = source
-                          Forms = forms
-                          NamespaceForm =
-                            forms
-                            |> List.tryFind (fun form -> namespaceNameOfForm form |> Option.isSome) })
-        if diagnostics.Count = 0 then Ok loaded else Error(List.ofSeq diagnostics)
-
-    let private evaluateLoaded (session: Session) (loaded: LoadedSource list) =
-        let entriesWithOwners =
-            loaded
-            |> List.collect (fun item ->
-                item.Forms |> List.map (fun form -> item.Source, form))
-        let entries =
-            entriesWithOwners
-            |> List.map (fun (source, form) -> source.NamespaceName, form)
-        let output, diagnosticEntries = session.EvalEntriesDetailed entries
-        let diagnostics =
-            diagnosticEntries
-            |> List.map (fun (index, diagnostic) ->
-                let source, _ = entriesWithOwners.[index]
-                let text = SourceText.Create(source.Text, source.Path)
-                text.Render diagnostic)
-        diagnostics, List.tryLast output.Values
+        let mutable lastValue = None
+        for source in sources do
+            setNamespace session source.NamespaceName
+            let text = SourceText.Create(source.Text, source.Path)
+            let result = session.EvalText text
+            for diagnostic in result.Diagnostics do
+                diagnostics.Add(text.Render diagnostic)
+            match List.tryLast result.Values with
+            | Some value -> lastValue <- Some value
+            | None -> ()
+        List.ofSeq diagnostics, lastValue
 
     let private buildSession (sources: ProjectSource list) (output: TextWriter) =
-        match readLoadedSources sources with
-        | Error errors -> Error errors
-        | Ok loaded ->
-            let session = Session(output = output)
-            let diagnostics, lastValue = evaluateLoaded session loaded
-            if diagnostics.IsEmpty then
-                Ok(session, loaded, lastValue)
-            else
-                Error diagnostics
+        let session = Session(output = output)
+        let diagnostics, lastValue = evaluateSources session sources
+        if diagnostics.IsEmpty then
+            Ok(session, lastValue)
+        else
+            Error diagnostics
 
     let openSession (path: string) (output: TextWriter) : Result<ProjectSession, string list> =
         match loadGraph path with
@@ -437,7 +396,7 @@ module Project =
                 let ordered = orderSources sources
                 match buildSession ordered output with
                 | Error errors -> Error errors
-                | Ok(session, _, lastValue) ->
+                | Ok(session, lastValue) ->
                     Ok
                         { RootPath = Path.GetFullPath path
                           Output = output
@@ -495,7 +454,7 @@ module Project =
                 if needsFullReload then
                     match buildSession ordered state.Output with
                     | Error errors -> Error errors
-                    | Ok(session, _, lastValue) ->
+                    | Ok(session, lastValue) ->
                         state.Root <- List.last projects
                         state.Projects <- projects
                         state.Sources <- ordered
@@ -509,22 +468,19 @@ module Project =
                 elif changed.IsEmpty then
                     Ok []
                 else
-                    match readLoadedSources changed with
-                    | Error errors -> Error errors
-                    | Ok loaded ->
-                        let diagnostics, lastValue = evaluateLoaded state.Session loaded
-                        if diagnostics.IsEmpty then
-                            state.Root <- List.last projects
-                            state.Projects <- projects
-                            state.Sources <- ordered
-                            state.Texts <-
-                                ordered
-                                |> List.map (fun source -> source.Path, source.Text)
-                                |> Map.ofList
-                            state.LastValue <- lastValue
-                            Ok(changed |> List.map (fun source -> source.Path))
-                        else
-                            Error diagnostics
+                    let diagnostics, lastValue = evaluateSources state.Session changed
+                    if diagnostics.IsEmpty then
+                        state.Root <- List.last projects
+                        state.Projects <- projects
+                        state.Sources <- ordered
+                        state.Texts <-
+                            ordered
+                            |> List.map (fun source -> source.Path, source.Text)
+                            |> Map.ofList
+                        state.LastValue <- lastValue
+                        Ok(changed |> List.map (fun source -> source.Path))
+                    else
+                        Error diagnostics
 
     let run (path: string) (output: TextWriter) (execute: bool) : Result<ProjectRunResult, string list> =
         match openSession path output with
