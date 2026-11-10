@@ -131,6 +131,11 @@ let private runRepl
     let buffer = StringBuilder()
     let mutable running = true
     let mutable nextIndent = 0
+    let mutable inputId = 0
+
+    let nextSource (text: string) =
+        inputId <- inputId + 1
+        SourceText.Create(text, sprintf "<repl:%d>" inputId)
 
     let refreshNow () =
         match refresh with
@@ -173,7 +178,7 @@ let private runRepl
                 buffer.Append(line) |> ignore
                 nextIndent <- Repl.nextIndent line
                 let text = buffer.ToString()
-                let source = SourceText.Create(text, "<repl>")
+                let source = nextSource text
                 let session = getSession ()
                 let result = session.EvalText source
                 if not result.Diagnostics.IsEmpty then
@@ -195,7 +200,7 @@ let private runRepl
 
     reader.Save()
     if buffer.Length > 0 && not (String.IsNullOrWhiteSpace(buffer.ToString())) then
-        let source = SourceText.Create(buffer.ToString(), "<repl>")
+        let source = nextSource (buffer.ToString())
         let read = Reader.readFormsFrom source (getSession()).ReaderOptions 0
         if not read.Diagnostics.IsEmpty then renderDiagnostics source read.Diagnostics
     0
