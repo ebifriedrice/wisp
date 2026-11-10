@@ -140,6 +140,7 @@ module SourceMetadata =
     let endKey = Keyword.Intern("wisp", "end")
     let lineKey = Keyword.Intern("wisp", "line")
     let columnKey = Keyword.Intern("wisp", "column")
+    let pathKey = Keyword.Intern("wisp", "path")
     /// Source-ordered key/value forms for map literals. Map values themselves
     /// are unordered, but syntax-quote splicing needs the original order.
     let mapFormsKey = Keyword.Intern("wisp", "map-forms")
@@ -156,12 +157,26 @@ module SourceMetadata =
                     None)
         | _ -> None
 
-    let trySpan (form: obj) : TextSpan option =
-        match tryInt startKey form, tryInt endKey form with
-        | Some start, Some finish when finish >= start -> Some(TextSpan.Create(start, finish - start))
+    let private tryString (key: Keyword) (form: obj) =
+        match form with
+        | :? IMeta as meta ->
+            meta.Meta
+            |> Option.bind (fun metadata -> metadata.TryGet key)
+            |> Option.bind (function
+                | :? string as text -> Some text
+                | _ -> None)
         | _ -> None
 
     let tryLineColumn (form: obj) =
         match tryInt lineKey form, tryInt columnKey form with
         | Some line, Some column -> Some(line, column)
+        | _ -> None
+
+    let trySpan (form: obj) : TextSpan option =
+        match tryInt startKey form, tryInt endKey form with
+        | Some start, Some finish when finish >= start ->
+            let path = tryString pathKey form
+            match tryLineColumn form with
+            | Some(line, column) -> Some(TextSpan.Create(start, finish - start, path, line, column))
+            | None -> Some(TextSpan.Create(start, finish - start))
         | _ -> None

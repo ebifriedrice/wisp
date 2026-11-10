@@ -366,13 +366,21 @@ module Project =
 
     let private evaluateSources (session: Session) (sources: ProjectSource list) =
         let diagnostics = ResizeArray<string>()
+        let texts =
+            sources
+            |> List.map (fun source -> source.Path, SourceText.Create(source.Text, source.Path))
+            |> Map.ofList
         let mutable lastValue = None
         for source in sources do
             setNamespace session source.NamespaceName
-            let text = SourceText.Create(source.Text, source.Path)
+            let text = texts.[source.Path]
             let result = session.EvalText text
             for diagnostic in result.Diagnostics do
-                diagnostics.Add(text.Render diagnostic)
+                let renderer =
+                    match diagnostic.Span.Path with
+                    | Some path -> texts |> Map.tryFind path |> Option.defaultValue text
+                    | None -> text
+                diagnostics.Add(renderer.Render diagnostic)
             match List.tryLast result.Values with
             | Some value -> lastValue <- Some value
             | None -> ()

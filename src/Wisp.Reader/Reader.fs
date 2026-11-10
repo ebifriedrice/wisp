@@ -195,7 +195,8 @@ type private ReaderState(source: SourceText, options: ReaderOptions, startPositi
         if position < text.Length then position <- position + 1
 
     member _.Span(start: int, length: int) =
-        TextSpan.Create(start, max 0 (min length (text.Length - start)))
+        let line, column = source.LineColumn start
+        TextSpan.Create(start, max 0 (min length (text.Length - start)), source.Path, line, column)
 
     member this.Fail(code: string, message: string, span: TextSpan) : 'T =
         raise (ReadException(Diagnostic.create code DiagnosticSeverity.Error message span))
@@ -256,7 +257,10 @@ type private ReaderState(source: SourceText, options: ReaderOptions, startPositi
                     let withStart = PersistentMap.Empty.Assoc(SourceMetadata.startKey, box start)
                     let withEnd = withStart.Assoc(SourceMetadata.endKey, box finish)
                     let withLine = withEnd.Assoc(SourceMetadata.lineKey, box line)
-                    withLine.Assoc(SourceMetadata.columnKey, box column)
+                    let withColumn = withLine.Assoc(SourceMetadata.columnKey, box column)
+                    match source.Path with
+                    | Some path -> withColumn.Assoc(SourceMetadata.pathKey, box path)
+                    | None -> withColumn
                 target.WithMeta(Meta.merge target.Meta (Some sourceMetadata))
             | _ -> value
 

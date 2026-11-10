@@ -317,8 +317,7 @@ type SyntaxTree internal (source: SourceText, root: GreenNode, diagnostics: Diag
                         SyntaxTree.Parse newSource
                     else
                         let shiftSpan (span: TextSpan) =
-                            { Start = span.Start + delta
-                              Length = span.Length }
+                            { span with Start = span.Start + delta }
                         let shiftDiagnostic (diagnostic: Diagnostic) =
                             { diagnostic with
                                 Span = shiftSpan diagnostic.Span
