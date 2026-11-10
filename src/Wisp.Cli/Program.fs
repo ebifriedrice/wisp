@@ -7,7 +7,7 @@ open Wisp.Core
 open Wisp.Reader
 open Wisp.Compiler
 
-let private version = "0.1.2-bootstrap"
+let private version = "0.1.3-bootstrap"
 
 let private usage () =
     printfn "wisp %s" version
