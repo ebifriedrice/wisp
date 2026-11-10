@@ -16,7 +16,7 @@ Evaluates one form and prints its value.
 
 ### `wisp`
 
-Starts the TUI REPL in a fresh session.
+Starts the REPL in a fresh session.
 
 ### `wisp repl [project]`
 
@@ -56,28 +56,27 @@ Print the version or usage.
 
 ## Project REPL
 
-An interactive project REPL uses a Terminal.Gui editor with multiline editing,
-selection, clipboard, undo/redo, and Wisp syntax highlighting.
+The project REPL is line-oriented and supports multiline input, Wisp syntax
+highlighting, and persisted history (`~/.wisp_history`). Press Enter to submit a
+line; an incomplete form continues on the next line.
 
 | Key | Action |
 |---|---|
-| `F5` / `Ctrl+Enter` | Evaluate the editor contents |
-| `Ctrl+/` | Show REPL key help |
-| `Alt+Up` / `Alt+Down` | Previous / next expression history |
-| `Ctrl+Q` | Quit |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
-| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
-| `Ctrl+A` | Select all |
-| `Ctrl+F` / `Ctrl+H` | Find / replace (editor) |
+| `Enter` | Submit the line, or continue a multiline form |
+| `Up` / `Down` | Previous / next history entry |
+| `Ctrl-C` | Clear the current input |
+| `Ctrl-D` | Exit on an empty line |
+| `Ctrl-L` | Clear the screen |
+| `Ctrl-U` / `Ctrl-K` | Delete to the start / end of the line |
+| `Left` / `Right`, `Home` / `End` | Move the cursor |
+| `Backspace` / `Delete` | Delete a character |
+| `Tab` | Insert two spaces |
 
-Commands are submitted with `F5`:
+Commands:
 
-- `:help` — key help.
+- `:help` — show command help.
 - `:reload` — force a project reload.
 - `:quit` / `:q` / `:exit` — quit.
-
-When stdin or stdout is redirected, the CLI falls back to a line-oriented REPL
-with persisted history (`~/.wisp_history`) and multiline input.
 
 ### Hot reload
 

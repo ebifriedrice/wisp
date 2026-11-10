@@ -9,7 +9,6 @@ reloads changed files.
 Requirements:
 
 - .NET 10 or .NET 11 SDK.
-- A terminal for the TUI REPL.
 
 Build from the repository:
 
@@ -126,21 +125,23 @@ wisp repl
 wisp repl path/to/project/wisp.proj
 ```
 
-The interactive REPL uses a Terminal.Gui editor with multiline editing, selection,
-clipboard, undo/redo, Wisp syntax highlighting, and a read-only transcript.
+The REPL is line-oriented: type a form and press Enter. Incomplete forms continue
+on the next line, and results and diagnostics are printed as they are evaluated.
+History persists in `~/.wisp_history`.
 
 | Key | Action |
 |---|---|
-| `F5` / `Ctrl+Enter` | Evaluate the editor contents |
-| `Ctrl+/` | Show key help |
-| `Alt+Up` / `Alt+Down` | Previous / next expression history |
-| `Ctrl+Q` | Quit |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
-| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
-| `Ctrl+A` | Select all |
+| `Enter` | Submit the line, or continue a multiline form |
+| `Up` / `Down` | Previous / next history entry |
+| `Ctrl-C` | Clear the current input |
+| `Ctrl-D` | Exit on an empty line |
+| `Ctrl-L` | Clear the screen |
+| `Ctrl-U` / `Ctrl-K` | Delete to the start / end of the line |
+| `Left` / `Right`, `Home` / `End` | Move the cursor |
+| `Backspace` / `Delete` | Delete a character |
+| `Tab` | Insert two spaces |
 
-When stdin or stdout is redirected, the CLI falls back to a line-oriented REPL
-with persisted history (`~/.wisp_history`).
+Commands: `:help`, `:reload`, and `:quit` (also `:q` and `:exit`).
 
 ### Hot reload
 
@@ -577,8 +578,8 @@ See [How to use the MSBuild SDK](docs/how-to-guides/use-the-msbuild-sdk.md).
   top-level reparse.
 - **Wisp.Compiler** — reader forms → macro expansion → Core IR → validation →
   optimization → interpreter or Reflection.Emit.
-- **Wisp.Cli** — file runner, project runner, template scaffolding, TUI/line
-  REPL, and hot reload.
+- **Wisp.Cli** — file runner, project runner, template scaffolding, REPL, and
+  hot reload.
 
 Compiler layers:
 
@@ -642,8 +643,6 @@ wisp samples/records.wisp
   `PackageReference`.
 - The compiler consumes reader values with source metadata rather than lowering
   directly from the syntax tree.
-- The TUI captures Wisp session output; direct `Console` writes from CLR interop
-  can paint over the screen.
 
 ## Documentation
 
