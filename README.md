@@ -50,6 +50,26 @@ dotnet run --project src/Wisp.Cli --no-build -- build samples/projects/app/app.w
 dotnet run --project src/Wisp.Cli --no-build -- run   samples/projects/app/app.wisp.proj
 ```
 
+Scaffold a new project from a built-in template:
+
+```bash
+wisp new hello
+wisp init my-lib --template lib
+wisp init my-app --template workspace
+wisp templates
+```
+
+Start a project-aware REPL:
+
+```bash
+wisp repl samples/projects/app/app.wisp.proj
+```
+
+The TUI REPL uses a real multiline editor with clipboard, undo/redo, syntax
+highlighting, history, and `F5` evaluation. It watches project sources and
+manifests, reloading changed function files in place and rebuilding the session
+when types or the project graph change.
+
 Project loading uses a declaration pass for namespaces, types, macros, and
 functions, so no `declare` forms are needed for forward references. Referenced
 projects load first and share one runtime. The CLI ships as the `Wisp.Cli`
