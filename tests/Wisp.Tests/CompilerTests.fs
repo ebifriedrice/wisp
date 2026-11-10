@@ -210,6 +210,17 @@ type CompilerTests() =
         Assert.True(generated.Diagnostics.Head.Notes |> List.exists (fun note -> note.Contains("macro user/bad")))
 
     [<Fact>]
+    member _.``macro expansion runs before declaration classification``() =
+        for backend in [ ExecutionBackend.Interpreter; ExecutionBackend.ReflectionEmit ] do
+            let session = Session(output = new StringWriter(), backend = backend)
+            let result =
+                session.EvalText(
+                    "(defmacro def-answer [name] (list 'def name 42)) (def-answer answer) (defmacro make-fn [name] (list 'defn name [] 9)) (make-fn nine) [answer (nine)]"
+                )
+            Assert.Empty(result.Diagnostics)
+            Assert.Equal("[42 9]", Print.printString (List.last result.Values))
+
+    [<Fact>]
     member _.``loop recur and try catch run on both execution backends``() =
         let run backend (text: string) =
             let writer = new StringWriter()

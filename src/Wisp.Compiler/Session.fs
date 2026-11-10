@@ -217,29 +217,89 @@ type Session
     member this.EvalEntriesDetailed(entries: (string * obj) list) : EvalOutput * (int * Diagnostic) list =
         let entryArray = entries |> List.toArray
         let count = entryArray.Length
-        let kinds = entryArray |> Array.map (fun (_, form) -> DefinitionForm.kind form)
+        let expandedForms = entryArray |> Array.map snd
+        let rawKinds = entryArray |> Array.map (fun (_, form) -> DefinitionForm.kind form)
         let values : obj option[] = Array.zeroCreate count
+        let processed : bool[] = Array.zeroCreate count
+        let failed : bool[] = Array.zeroCreate count
         let diagnostics = ResizeArray<int * Diagnostic>()
+        let batchExpansions = ResizeArray<MacroExpansion>()
+        let expansionsByIndex : MacroExpansion list[] = Array.create count []
+        lastExpansions <- []
 
-        let evaluate index =
+        let attachExpansionNotes index (errors: Diagnostic list) =
+            match expansionsByIndex.[index] with
+            | [] -> errors
+            | expansions ->
+                let notes =
+                    expansions
+                    |> List.map (fun expansion ->
+                        sprintf
+                            "macro %s: %s => %s"
+                            expansion.MacroName
+                            (Print.printString expansion.Invocation)
+                            (Print.printString expansion.Result))
+                errors
+                |> List.map (fun diagnostic ->
+                    { diagnostic with Notes = diagnostic.Notes @ notes })
+
+        let evaluateRaw index =
             let namespaceName, form = entryArray.[index]
             runtime.CurrentNamespace <- namespaceName
             runtime.Registry.GetOrCreate namespaceName |> ignore
             this.EvalOne form
 
+        let evaluate index =
+            let namespaceName, _ = entryArray.[index]
+            runtime.CurrentNamespace <- namespaceName
+            runtime.Registry.GetOrCreate namespaceName |> ignore
+            this.EvalOne expandedForms.[index]
+
         let record index result =
             match result with
             | Ok value -> values.[index] <- Some value
-            | Error errors -> errors |> List.iter (fun diagnostic -> diagnostics.Add(index, diagnostic))
+            | Error errors ->
+                errors
+                |> attachExpansionNotes index
+                |> List.iter (fun diagnostic -> diagnostics.Add(index, diagnostic))
 
         for index in 0 .. count - 1 do
-            if kinds.[index] = NamespaceDefinition then
-                evaluate index |> record index
+            if rawKinds.[index] = NamespaceDefinition then
+                evaluateRaw index |> record index
+                processed.[index] <- true
+
+        for index in 0 .. count - 1 do
+            if rawKinds.[index] = MacroDefinition then
+                evaluateRaw index |> record index
+                processed.[index] <- true
+
+        // Expand macros before classifying and resolving expanded forms. A
+        // macro may produce a defmacro, so evaluate generated macro definitions
+        // as they are encountered.
+        for index in 0 .. count - 1 do
+            if not failed.[index] && not processed.[index] then
+                let namespaceName, _ = entryArray.[index]
+                runtime.CurrentNamespace <- namespaceName
+                runtime.Registry.GetOrCreate namespaceName |> ignore
+                match MacroExpander.expand runtime namespaceName expandedForms.[index] with
+                | Error errors ->
+                    failed.[index] <- true
+                    errors |> List.iter (fun error -> diagnostics.Add(index, toDiagnostic error))
+                | Ok expansion ->
+                    batchExpansions.AddRange expansion.Expansions
+                    expansionsByIndex.[index] <- expansion.Expansions
+                    expandedForms.[index] <- expansion.Form
+                    if DefinitionForm.kind expansion.Form = MacroDefinition then
+                        evaluate index |> record index
+                        processed.[index] <- true
+
+        let kinds = expandedForms |> Array.map DefinitionForm.kind
 
         let pendingTypes =
             ResizeArray<int>(
                 [ for index in 0 .. count - 1 do
-                      if kinds.[index] = TypeDefinition then yield index ]
+                      if not failed.[index] && not processed.[index] && kinds.[index] = TypeDefinition then
+                          yield index ]
             )
         let lastTypeErrors = Collections.Generic.Dictionary<int, Diagnostic list>()
         let mutable progress = true
@@ -258,20 +318,30 @@ type Session
             pendingTypes.AddRange remaining
         for index in pendingTypes do
             match lastTypeErrors.TryGetValue index with
-            | true, errors -> errors |> List.iter (fun diagnostic -> diagnostics.Add(index, diagnostic))
+            | true, errors ->
+                errors
+                |> attachExpansionNotes index
+                |> List.iter (fun diagnostic -> diagnostics.Add(index, diagnostic))
             | false, _ -> ()
 
         for kindToRun in [ MacroDefinition; FunctionDefinition ] do
             for index in 0 .. count - 1 do
-                if kinds.[index] = kindToRun then
+                if
+                    not failed.[index]
+                    && not processed.[index]
+                    && kinds.[index] = kindToRun
+                then
                     evaluate index |> record index
+                    processed.[index] <- true
 
         for index in 0 .. count - 1 do
-            match kinds.[index] with
-            | ValueDefinition
-            | OtherDefinition -> evaluate index |> record index
-            | _ -> ()
+            if not failed.[index] && not processed.[index] then
+                match kinds.[index] with
+                | ValueDefinition
+                | OtherDefinition -> evaluate index |> record index
+                | _ -> ()
 
+        lastExpansions <- List.ofSeq batchExpansions
         let orderedDiagnostics =
             diagnostics
             |> Seq.sortBy fst
