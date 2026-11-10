@@ -25,7 +25,7 @@ to GitHub Packages:
 ```bash
 dotnet tool install --global Wisp.Cli \
   --add-source https://nuget.pkg.github.com/ebifriedrice/index.json \
-  --version 0.1.2-bootstrap
+  --version 0.1.3-bootstrap
 wisp --version
 ```
 
@@ -264,10 +264,12 @@ Imports and aliases are namespace-scoped. `:refer` and `:use` add referrals;
 namespace.
 
 Evaluation uses declaration-oriented passes for every batch: a source file, a
-REPL submission, or the combined project graph. Namespaces run first, then types
-(with retries for forward type references), then macros and functions, then
-values and methods. No `declare` form is needed for forward references, whether
-the definitions are in one file, a REPL submission, or across projects.
+REPL submission, or the combined project graph. Namespaces run first, then macro
+definitions. The remaining forms are macro-expanded and classified, then types
+(with retries for forward type references), functions, and finally values and
+methods. Resolution always sees expanded forms. No `declare` form is needed for
+forward references, whether the definitions are in one file, a REPL submission,
+or across projects.
 
 ## 9. Documentation in the language
 
@@ -569,15 +571,16 @@ See [How to use the MSBuild SDK](docs/how-to-guides/use-the-msbuild-sdk.md).
 Compiler layers:
 
 1. Surface forms with metadata and source ranges.
-2. Macro expansion with expansion traces.
-3. Core IR: `Const`, `Local`, `VarRef`, `If`, `Do`, `Let`, `Lambda`, `Call`,
-   `Def`, `Quote`, namespace ops, CLR call/property/construct nodes, type and
-   method definitions, `Async`, `Await`, `Loop`, `Recur`, `Try`, and `Throw`.
+2. Declaration passes for every batch: namespaces, macro definitions,
+   macro-expansion and classification, types with forward-reference retries,
+   functions, then values and methods.
+3. Resolution and desugaring of expanded forms into Core IR: `Const`, `Local`,
+   `VarRef`, `If`, `Do`, `Let`, `Lambda`, `Call`, `Def`, `Quote`, namespace
+   ops, CLR call/property/construct nodes, type and method definitions,
+   `Async`, `Await`, `Loop`, `Recur`, `Try`, and `Throw`.
 4. `recur` tail-position and arity validation.
 5. Constant folding, `do` flattening, and identity-let elimination.
-6. Declaration passes for every batch: namespaces, types with forward-reference
-   retries, macros/functions, then values and methods.
-7. Interpreter or emitted IL in a collectible dynamic assembly. Lambdas become
+6. Interpreter or emitted IL in a collectible dynamic assembly. Lambdas become
    generated `AFn` subclasses; async bodies use runtime async on .NET 11 and a
    continuation transform on .NET 10.
 
