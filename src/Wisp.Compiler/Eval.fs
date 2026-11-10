@@ -23,7 +23,14 @@ type Closure
     member _.Self
         with set value = self <- value
 
-    override _.Invoke(args: obj[]) =
+    override _.Name =
+        match name with
+        | Some functionName when not (String.IsNullOrWhiteSpace functionName) ->
+            if String.IsNullOrWhiteSpace definingNamespace then functionName
+            else definingNamespace + "/" + functionName
+        | _ -> "fn"
+
+    override _.InvokeCore(args: obj[]) =
         let required = parameters.Length
         if args.Length < required || (rest.IsNone && args.Length <> required) then
             let expected = if rest.IsSome then sprintf "at least %d" required else string required
@@ -129,7 +136,8 @@ module Eval =
 
         // Runtime exception types are part of try/catch semantics, so calls must
         // not flatten them into EvaluationException before a typed handler runs.
-        let guarded action = action ()
+        // The call site is still published so an escaping exception gets a frame.
+        let guarded action = CallStack.withSite expression.Span action
 
         match expression.Node with
         | Const value -> value
@@ -365,7 +373,9 @@ module Eval =
         | Throw(value) ->
             let thrown = evaluate value environment currentNamespace
             match thrown with
-            | :? Exception as error -> raise error
+            | :? Exception as error ->
+                CallStack.capture error expression.Span
+                raise error
             | _ ->
                 let message =
                     match thrown with

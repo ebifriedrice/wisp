@@ -62,11 +62,16 @@ type RuntimeOps private () =
 
         environment :> obj
 
-    static member Invoke(callee: obj, arguments: obj[]) : obj =
-        match callee with
-        | :? Delegate as delegateValue -> DelegateOps.Invoke(delegateValue, arguments)
-        | :? IFn as functionValue -> functionValue.Invoke arguments
-        | _ -> raise (EvaluationException(sprintf "%s is not callable." (Print.printString callee), None))
+    static member Invoke(runtime: RuntimeState, callee: obj, arguments: obj[], spanValue: obj) : obj =
+        let span = CallStack.unboxSpan spanValue
+        CallStack.withSite span (fun () ->
+            match callee with
+            | :? Delegate as delegateValue -> DelegateOps.Invoke(delegateValue, arguments)
+            | :? IFn as functionValue -> functionValue.Invoke arguments
+            | _ ->
+                raise (
+                    EvaluationException(sprintf "%s is not callable." (Print.printString callee), span)
+                ))
 
     static member ResolveVar(runtime: RuntimeState, symbolId: int, currentNamespace: string) : obj =
         let symbol = runtime.GetConstant symbolId :?> Symbol
@@ -131,55 +136,65 @@ type RuntimeOps private () =
             current.AddReferral(name, namespaceName, name)
         null
 
-    static member StaticCall(runtime: RuntimeState, typeId: int, memberName: string, arguments: obj[]) : obj =
+    static member StaticCall
+        (runtime: RuntimeState, typeId: int, memberName: string, arguments: obj[], spanValue: obj)
+        : obj =
+        let span = CallStack.unboxSpan spanValue
         let clrType = runtime.GetConstant typeId :?> Type
         try Clr.invokeStatic clrType memberName arguments
-        with InteropException message -> raise (EvaluationException(message, None))
+        with InteropException message -> raise (EvaluationException(message, span))
 
-    static member InstanceCall(runtime: RuntimeState, target: obj, memberName: string, arguments: obj[]) : obj =
+    static member InstanceCall
+        (runtime: RuntimeState, target: obj, memberName: string, arguments: obj[], spanValue: obj)
+        : obj =
+        let span = CallStack.unboxSpan spanValue
         try RecordOps.invokeInstance runtime target memberName arguments
-        with InteropException message -> raise (EvaluationException(message, None))
+        with InteropException message -> raise (EvaluationException(message, span))
 
-    static member InstanceProperty(target: obj, memberName: string) : obj =
+    static member InstanceProperty(runtime: RuntimeState, target: obj, memberName: string, spanValue: obj) : obj =
+        let span = CallStack.unboxSpan spanValue
         try Clr.getInstanceProperty target memberName
-        with InteropException message -> raise (EvaluationException(message, None))
+        with InteropException message -> raise (EvaluationException(message, span))
 
-    static member Construct(runtime: RuntimeState, typeId: int, arguments: obj[]) : obj =
+    static member Construct(runtime: RuntimeState, typeId: int, arguments: obj[], spanValue: obj) : obj =
+        let span = CallStack.unboxSpan spanValue
         let clrType = runtime.GetConstant typeId :?> Type
         try Clr.construct clrType arguments
-        with InteropException message -> raise (EvaluationException(message, None))
+        with InteropException message -> raise (EvaluationException(message, span))
 
-    static member ConstructHint(runtime: RuntimeState, hintId: int, arguments: obj[]) : obj =
+    static member ConstructHint(runtime: RuntimeState, hintId: int, arguments: obj[], spanValue: obj) : obj =
+        let span = CallStack.unboxSpan spanValue
         let hintForm = runtime.GetConstant hintId
         match NamespaceResolution.resolveHint runtime hintForm with
         | Ok(Some clrType) ->
             try Clr.construct clrType arguments
-            with InteropException message -> raise (EvaluationException(message, None))
+            with InteropException message -> raise (EvaluationException(message, span))
         | Ok None ->
-            raise (EvaluationException(sprintf "Cannot resolve CLR type %s." (Print.printString hintForm), None))
+            raise (EvaluationException(sprintf "Cannot resolve CLR type %s." (Print.printString hintForm), span))
         | Error errors ->
             let notes =
                 errors |> List.map (fun error -> sprintf "%s: %s" error.Path error.Message) |> String.concat "; "
             raise (
                 EvaluationException(
                     sprintf "Cannot resolve CLR type %s: %s" (Print.printString hintForm) notes,
-                    None
+                    span
                 )
             )
 
-    static member TypeTestHint(runtime: RuntimeState, hintId: int, value: obj) : obj =
+    static member TypeTestHint(runtime: RuntimeState, hintId: int, value: obj, spanValue: obj) : obj =
+        let span = CallStack.unboxSpan spanValue
         let hintForm = runtime.GetConstant hintId
         match NamespaceResolution.resolveHint runtime hintForm with
         | Ok(Some clrType) -> box (clrType.IsInstanceOfType value)
         | Ok None ->
-            raise (EvaluationException(sprintf "Cannot resolve type %s." (Print.printString hintForm), None))
+            raise (EvaluationException(sprintf "Cannot resolve type %s." (Print.printString hintForm), span))
         | Error errors ->
             let notes =
                 errors |> List.map (fun error -> sprintf "%s: %s" error.Path error.Message) |> String.concat "; "
             raise (
                 EvaluationException(
                     sprintf "Cannot resolve type %s: %s" (Print.printString hintForm) notes,
-                    None
+                    span
                 )
             )
 
@@ -280,15 +295,22 @@ type RuntimeOps private () =
 
     static member Recur(values: obj[]) : obj = raise (RecurSignal values)
 
-    static member Throw(value: obj) : obj =
+    static member Await(runtime: RuntimeState, value: obj, spanValue: obj) : obj =
+        let span = CallStack.unboxSpan spanValue
+        CallStack.withSite span (fun () -> AsyncOps.AwaitSync value)
+
+    static member Throw(runtime: RuntimeState, value: obj, spanValue: obj) : obj =
+        let span = CallStack.unboxSpan spanValue
         match value with
-        | :? Exception as error -> raise error
+        | :? Exception as error ->
+            CallStack.capture error span
+            raise error
         | _ ->
             let message =
                 match value with
                 | :? string as text -> text
                 | _ -> Print.printString value
-            raise (EvaluationException(message, None))
+            raise (EvaluationException(message, span))
 
 module Codegen =
     let private runtimeOpsMethod (name: string) =
@@ -327,6 +349,7 @@ module Codegen =
     let private defineConstructorMethod = runtimeOpsMethod "DefineConstructor"
     let private recurMethod = runtimeOpsMethod "Recur"
     let private throwMethod = runtimeOpsMethod "Throw"
+    let private awaitMethod = runtimeOpsMethod "Await"
     let private asTaskMethod =
         typeof<AsyncOps>.GetMethod("AsTask", [| typeof<obj> |])
     let private awaitSyncMethod =
@@ -340,7 +363,8 @@ module Codegen =
         typeof<Type>.GetMethod("GetTypeFromHandle", [| typeof<RuntimeTypeHandle> |])
     let private recurSignalValues = typeof<RecurSignal>.GetProperty("Values").GetGetMethod()
     let private afnConstructor = typeof<AFn>.GetConstructor(Type.EmptyTypes)
-    let private afnInvoke = typeof<AFn>.GetMethod("Invoke", [| typeof<obj[]> |])
+    let private afnInvokeCore = typeof<AFn>.GetMethod("InvokeCore", [| typeof<obj[]> |])
+    let private afnName = typeof<AFn>.GetProperty("Name").GetGetMethod()
 
     /// Compiles a Core expression into a static evaluator method. Lambda nodes
     /// are compiled into real AFn subclasses whose Invoke methods contain IL,
@@ -374,6 +398,12 @@ module Codegen =
                 il.Emit(OpCodes.Ldloc, runtimeLocal)
                 il.Emit(OpCodes.Ldc_I4, constantId)
                 il.Emit(OpCodes.Call, constantMethod)
+
+        let emitSpan (il: ILGenerator) (runtimeLocal: LocalBuilder) (span: TextSpan option) =
+            let spanId = runtime.RegisterConstant span
+            il.Emit(OpCodes.Ldloc, runtimeLocal)
+            il.Emit(OpCodes.Ldc_I4, spanId)
+            il.Emit(OpCodes.Call, constantMethod)
 
         let useRuntimeAsync =
             not runtime.ForceCompilerAsync && AsyncSupport.runtimeAsyncAvailable
@@ -437,8 +467,10 @@ module Codegen =
                 emitIn isAsync il runtimeLocal environment callee
                 il.Emit(OpCodes.Stloc, calleeLocal)
                 let argumentsLocal = emitArguments isAsync il runtimeLocal environment arguments
+                il.Emit(OpCodes.Ldloc, runtimeLocal)
                 il.Emit(OpCodes.Ldloc, calleeLocal)
                 il.Emit(OpCodes.Ldloc, argumentsLocal)
+                emitSpan il runtimeLocal expression.Span
                 il.Emit(OpCodes.Call, invokeMethod)
             | Def(symbol, value) ->
                 let symbolId = runtime.RegisterConstant symbol
@@ -495,6 +527,7 @@ module Codegen =
                 il.Emit(OpCodes.Ldc_I4, typeId)
                 il.Emit(OpCodes.Ldstr, memberName)
                 il.Emit(OpCodes.Ldloc, argumentsLocal)
+                emitSpan il runtimeLocal expression.Span
                 il.Emit(OpCodes.Call, staticCallMethod)
             | InstanceCall(target, memberName, arguments) ->
                 let targetLocal = il.DeclareLocal(typeof<obj>)
@@ -505,10 +538,13 @@ module Codegen =
                 il.Emit(OpCodes.Ldloc, targetLocal)
                 il.Emit(OpCodes.Ldstr, memberName)
                 il.Emit(OpCodes.Ldloc, argumentsLocal)
+                emitSpan il runtimeLocal expression.Span
                 il.Emit(OpCodes.Call, instanceCallMethod)
             | InstanceProperty(target, memberName) ->
+                il.Emit(OpCodes.Ldloc, runtimeLocal)
                 emitIn isAsync il runtimeLocal environment target
                 il.Emit(OpCodes.Ldstr, memberName)
+                emitSpan il runtimeLocal expression.Span
                 il.Emit(OpCodes.Call, instancePropertyMethod)
             | Construct(clrType, arguments) ->
                 let typeId = runtime.RegisterConstant clrType
@@ -516,6 +552,7 @@ module Codegen =
                 il.Emit(OpCodes.Ldloc, runtimeLocal)
                 il.Emit(OpCodes.Ldc_I4, typeId)
                 il.Emit(OpCodes.Ldloc, argumentsLocal)
+                emitSpan il runtimeLocal expression.Span
                 il.Emit(OpCodes.Call, constructMethod)
             | ConstructHint(hintForm, arguments) ->
                 let hintId = runtime.RegisterConstant hintForm
@@ -523,12 +560,14 @@ module Codegen =
                 il.Emit(OpCodes.Ldloc, runtimeLocal)
                 il.Emit(OpCodes.Ldc_I4, hintId)
                 il.Emit(OpCodes.Ldloc, argumentsLocal)
+                emitSpan il runtimeLocal expression.Span
                 il.Emit(OpCodes.Call, constructHintMethod)
             | TypeTestHint(hintForm, value) ->
                 let hintId = runtime.RegisterConstant hintForm
                 il.Emit(OpCodes.Ldloc, runtimeLocal)
                 il.Emit(OpCodes.Ldc_I4, hintId)
                 emitIn isAsync il runtimeLocal environment value
+                emitSpan il runtimeLocal expression.Span
                 il.Emit(OpCodes.Call, typeTestHintMethod)
             | DefineType(name, fields, definition, isStruct) ->
                 let fieldsId = runtime.RegisterConstant (fields |> Array.ofList)
@@ -710,16 +749,21 @@ module Codegen =
                     il.Emit(OpCodes.Castclass, typeof<Type>)
                     il.Emit(OpCodes.Call, toValueTaskOfMethod)
             | Await value ->
-                emitIn isAsync il runtimeLocal environment value
                 if isAsync && useRuntimeAsync then
+                    emitIn isAsync il runtimeLocal environment value
                     il.Emit(OpCodes.Call, asTaskMethod)
                     match AsyncSupport.awaitTaskOfObject with
                     | Some awaitMethod -> il.Emit(OpCodes.Call, awaitMethod)
                     | None -> il.Emit(OpCodes.Call, awaitSyncMethod)
                 else
-                    il.Emit(OpCodes.Call, awaitSyncMethod)
+                    il.Emit(OpCodes.Ldloc, runtimeLocal)
+                    emitIn isAsync il runtimeLocal environment value
+                    emitSpan il runtimeLocal expression.Span
+                    il.Emit(OpCodes.Call, awaitMethod)
             | Throw(value) ->
+                il.Emit(OpCodes.Ldloc, runtimeLocal)
                 emitIn isAsync il runtimeLocal environment value
+                emitSpan il runtimeLocal expression.Span
                 il.Emit(OpCodes.Call, throwMethod)
 
         and emitArguments
@@ -779,14 +823,32 @@ module Codegen =
             constructorIl.Emit(OpCodes.Stfld, environmentField)
             constructorIl.Emit(OpCodes.Ret)
 
+            let frameName =
+                match name with
+                | Some functionName when not (String.IsNullOrWhiteSpace functionName) ->
+                    if String.IsNullOrWhiteSpace currentNamespace then functionName
+                    else currentNamespace + "/" + functionName
+                | _ -> "fn"
+            let nameBuilder =
+                closureBuilder.DefineMethod(
+                    "get_Name",
+                    MethodAttributes.Public ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig,
+                    typeof<string>,
+                    Type.EmptyTypes
+                )
+            let nameIl = nameBuilder.GetILGenerator()
+            nameIl.Emit(OpCodes.Ldstr, frameName)
+            nameIl.Emit OpCodes.Ret
+            closureBuilder.DefineMethodOverride(nameBuilder, afnName)
+
             let invokeBuilder =
                 closureBuilder.DefineMethod(
-                    "Invoke",
+                    "InvokeCore",
                     MethodAttributes.Public ||| MethodAttributes.Virtual ||| MethodAttributes.HideBySig,
                     typeof<obj>,
                     [| typeof<obj[]> |]
                 )
-            closureBuilder.DefineMethodOverride(invokeBuilder, afnInvoke)
+            closureBuilder.DefineMethodOverride(invokeBuilder, afnInvokeCore)
             let invokeIl = invokeBuilder.GetILGenerator()
             let runtimeLocal = invokeIl.DeclareLocal(typeof<RuntimeState>)
             invokeIl.Emit(OpCodes.Ldarg_0)

@@ -133,25 +133,62 @@ type Session
                         let compiled = codegen.Value.Compile(expression, runtime.CurrentNamespace)
                         compiled.Invoke runtime
                 Ok value
-            with
-            | :? EvaluationException as error ->
+            with error ->
+                let trace = CallStack.tryGet error
+                let preciseSpan =
+                    match error with
+                    | :? EvaluationException as evaluation -> evaluation.Span
+                    | _ -> None
+                let origin =
+                    preciseSpan
+                    |> Option.orElse (trace |> Option.bind (fun trace -> trace.Origin))
+                    |> Option.orElse expression.Span
+                    |> Option.defaultValue TextSpan.Zero
+                // Frames record the call site that entered each function. In a
+                // .NET-style trace that location belongs to the caller, so each
+                // frame displays the previous frame's recorded call site. The
+                // outermost call site becomes a synthetic top-level frame.
+                let frames =
+                    match trace with
+                    | Some trace ->
+                        match trace.Frames with
+                        | [] -> []
+                        | [ first ] ->
+                            let head: CallFrame =
+                                { first with
+                                    Span = preciseSpan |> Option.orElse trace.Origin |> Option.orElse first.Span }
+                            match first.Span with
+                            | Some span ->
+                                [ head
+                                  { Function = "<top-level>"
+                                    Span = Some span } ]
+                            | None -> [ head ]
+                        | first :: rest ->
+                            let head: CallFrame =
+                                { first with
+                                    Span = preciseSpan |> Option.orElse trace.Origin |> Option.orElse first.Span }
+                            let rec shift previousSpan accumulated remaining =
+                                match remaining with
+                                | [] -> List.rev accumulated
+                                | [ last ] ->
+                                    let displayed: CallFrame = { last with Span = previousSpan }
+                                    match last.Span with
+                                    | Some span ->
+                                        List.rev (
+                                            ({ Function = "<top-level>"
+                                               Span = Some span }: CallFrame)
+                                            :: displayed
+                                            :: accumulated
+                                        )
+                                    | None -> List.rev (displayed :: accumulated)
+                                | frame :: tail ->
+                                    let displayed: CallFrame = { frame with Span = previousSpan }
+                                    shift frame.Span (displayed :: accumulated) tail
+                            head :: shift first.Span [] rest
+                    | None -> []
                 Error(
-                    [ Diagnostic.create
-                          "WISP3001"
-                          DiagnosticSeverity.Error
-                          error.Message
-                          (error.Span
-                           |> Option.orElse expression.Span
-                           |> Option.defaultValue TextSpan.Zero) ]
-                    |> withExpansionNotes
-                )
-            | error ->
-                Error(
-                    [ Diagnostic.create
-                          "WISP3001"
-                          DiagnosticSeverity.Error
-                          error.Message
-                          (expression.Span |> Option.defaultValue TextSpan.Zero) ]
+                    [ Diagnostic.create "WISP3001" DiagnosticSeverity.Error error.Message origin
+                      |> Diagnostic.withTrace frames ]
                     |> withExpansionNotes
                 )
 

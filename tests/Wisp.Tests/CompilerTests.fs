@@ -167,6 +167,37 @@ type CompilerTests() =
         Assert.Equal("WISP1001", incomplete.Diagnostics.Head.Code)
 
     [<Fact>]
+    member _.``runtime errors report the originating Wisp call stack``() =
+        for backend in [ ExecutionBackend.Interpreter; ExecutionBackend.ReflectionEmit ] do
+            let s = Session(output = new StringWriter(), backend = backend)
+            let text =
+                "(defn inner [x] (/ x 0))\n(defn middle [x] (inner x))\n(defn outer [x] (middle x))\n(outer 1)"
+            let result = s.EvalText text
+            Assert.NotEmpty(result.Diagnostics)
+            let diagnostic = result.Diagnostics.Head
+            Assert.Equal("WISP3001", diagnostic.Code)
+            Assert.Equal(4, diagnostic.Trace.Length)
+            Assert.Equal("user/inner", diagnostic.Trace.[0].Function)
+            Assert.Equal("user/middle", diagnostic.Trace.[1].Function)
+            Assert.Equal("user/outer", diagnostic.Trace.[2].Function)
+            Assert.Equal("<top-level>", diagnostic.Trace.[3].Function)
+            let source = SourceText.Create text
+            let line, _ = source.LineColumn diagnostic.Span.Start
+            Assert.Equal(1, line)
+            Assert.Contains("at user/inner", source.Render diagnostic)
+            Assert.Contains("at user/outer", source.Render diagnostic)
+
+            let thrownText =
+                "(defn boom [] (throw (new System.InvalidOperationException \"boom\")))\n(defn caller [] (boom))\n(caller)"
+            let thrown = s.EvalText thrownText
+            Assert.NotEmpty(thrown.Diagnostics)
+            Assert.Equal("user/boom", thrown.Diagnostics.Head.Trace.[0].Function)
+            Assert.Equal("user/caller", thrown.Diagnostics.Head.Trace.[1].Function)
+            let thrownSource = SourceText.Create thrownText
+            let thrownLine, _ = thrownSource.LineColumn thrown.Diagnostics.Head.Span.Start
+            Assert.Equal(1, thrownLine)
+
+    [<Fact>]
     member _.``optimizer folds constant conditionals and lets``() =
         let s = session ()
         let compile text =
